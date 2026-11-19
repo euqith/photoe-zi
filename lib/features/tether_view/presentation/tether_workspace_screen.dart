@@ -6,6 +6,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:photoe_zi/core/constants/studio_theme.dart';
 import 'package:photoe_zi/core/database/app_database.dart';
 import 'package:photoe_zi/core/utils/exif_and_histogram_utils.dart';
+import 'package:photoe_zi/features/cloud_sync/data/google_drive_cloud_sync_service.dart';
 import 'package:photoe_zi/features/cloud_sync/presentation/drive_sync_panel.dart';
 import 'package:photoe_zi/features/tether_view/presentation/tether_workspace_controller.dart';
 import 'package:photoe_zi/features/tether_view/presentation/widgets/exif_metadata_panel.dart';
@@ -1554,20 +1555,15 @@ class _TetherWorkspaceScreenState
                         child: Column(
                           crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
-                            TextField(
-                              key: const Key('input_google_access_token'),
-                              controller: tokenController,
-                              style: const TextStyle(
-                                color: StudioColors.textPrimary,
-                                fontSize: 11.5,
-                                fontFamily: StudioTheme.monospaceFont,
-                              ),
-                              decoration: const InputDecoration(
-                                hintText:
-                                    'Optional: Paste OAuth2 Access Token (ya29...)',
+                            const Text(
+                              'Option A: Personal GCP Desktop Client ID (Guaranteed Quota)',
+                              style: TextStyle(
+                                fontSize: 11,
+                                fontWeight: FontWeight.w600,
+                                color: StudioColors.accentAmber,
                               ),
                             ),
-                            const SizedBox(height: 8),
+                            const SizedBox(height: 4),
                             TextField(
                               key: const Key('input_google_client_id'),
                               controller: clientIdController,
@@ -1578,7 +1574,107 @@ class _TetherWorkspaceScreenState
                               ),
                               decoration: const InputDecoration(
                                 hintText:
-                                    'Optional: Custom GCP Desktop Client ID',
+                                    'Custom Client ID (e.g. 12345...apps.googleusercontent.com)',
+                              ),
+                            ),
+                            const SizedBox(height: 10),
+                            const Text(
+                              'Option B: Direct OAuth 2.0 Access Token',
+                              style: TextStyle(
+                                fontSize: 11,
+                                fontWeight: FontWeight.w600,
+                                color: StudioColors.accentAmber,
+                              ),
+                            ),
+                            const SizedBox(height: 4),
+                            Row(
+                              children: [
+                                Expanded(
+                                  child: TextField(
+                                    key: const Key('input_google_access_token'),
+                                    controller: tokenController,
+                                    style: const TextStyle(
+                                      color: StudioColors.textPrimary,
+                                      fontSize: 11.5,
+                                      fontFamily: StudioTheme.monospaceFont,
+                                    ),
+                                    decoration: const InputDecoration(
+                                      hintText: 'Access Token (ya29.a0...)',
+                                    ),
+                                  ),
+                                ),
+                                const SizedBox(width: 8),
+                                ElevatedButton(
+                                  style: ElevatedButton.styleFrom(
+                                    backgroundColor: StudioColors.panelElevated,
+                                    padding: const EdgeInsets.symmetric(
+                                      horizontal: 12,
+                                      vertical: 12,
+                                    ),
+                                  ),
+                                  onPressed: () async {
+                                    if (tokenController.text.trim().isEmpty) {
+                                      setDialogState(() {
+                                        isErrorFeedback = true;
+                                        statusFeedback =
+                                            'Please paste an OAuth Access Token first.';
+                                      });
+                                      return;
+                                    }
+                                    setDialogState(() {
+                                      isAuthenticating = true;
+                                    });
+                                    final ok = await controller
+                                        .signInGoogleWithAccessToken(
+                                      accessToken: tokenController.text,
+                                    );
+                                    setDialogState(() {
+                                      isAuthenticating = false;
+                                      if (ok) {
+                                        isErrorFeedback = false;
+                                        statusFeedback =
+                                            'Successfully connected as ${ref.read(tetherControllerProvider).googleUserEmail ?? 'Google Account'}!';
+                                      } else {
+                                        isErrorFeedback = true;
+                                        statusFeedback = ref
+                                                .read(tetherControllerProvider)
+                                                .googleAuthError ??
+                                            'Token verification failed';
+                                      }
+                                    });
+                                  },
+                                  child: const Text(
+                                    'Apply',
+                                    style: TextStyle(fontSize: 11),
+                                  ),
+                                ),
+                              ],
+                            ),
+                            const SizedBox(height: 8),
+                            InkWell(
+                              onTap: () {
+                                GoogleDriveCloudSyncService.openSystemUrl(
+                                  'https://developers.google.com/oauthplayground',
+                                );
+                              },
+                              child: const Row(
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  Icon(
+                                    Icons.open_in_new_rounded,
+                                    size: 13,
+                                    color: StudioColors.accentAmber,
+                                  ),
+                                  SizedBox(width: 4),
+                                  Text(
+                                    'Get token from Google OAuth 2.0 Playground',
+                                    style: TextStyle(
+                                      color: StudioColors.accentAmber,
+                                      fontSize: 11,
+                                      decoration: TextDecoration.underline,
+                                    ),
+                                  ),
+                                ],
                               ),
                             ),
                           ],

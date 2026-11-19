@@ -96,38 +96,90 @@ class GoogleDriveCloudSyncService implements CloudSyncService {
 
     if (cleanToken != null && cleanToken.isNotEmpty && !isDemoMode) {
       try {
-        final aboutResp = await _httpClient.get(
-          Uri.parse('https://www.googleapis.com/drive/v3/about?fields=user'),
-          headers: {'Authorization': 'Bearer $cleanToken'},
-        );
+        String? verifiedEmail = email;
+        String? verifiedName;
+        bool verifiedViaTokenInfo = false;
 
-        if (aboutResp.statusCode == 200) {
-          final body = jsonDecode(aboutResp.body) as Map<String, dynamic>;
-          final userMap = body['user'] as Map<String, dynamic>?;
-          final verifiedEmail =
-              userMap?['emailAddress']?.toString() ?? email ?? 'Google Drive User';
-          final verifiedName =
-              userMap?['displayName']?.toString() ?? verifiedEmail.split('@').first;
-
-          _currentUser = GoogleDriveAccount(
-            email: verifiedEmail,
-            displayName: verifiedName,
-            accessToken: cleanToken,
-            isDemoMode: false,
+        // Step 1: Check tokeninfo on oauth2.googleapis.com (no Drive API query quota consumed)
+        try {
+          final tokenInfoResp = await _httpClient.get(
+            Uri.parse(
+              'https://oauth2.googleapis.com/tokeninfo?access_token=$cleanToken',
+            ),
           );
-          unawaited(_processQueue());
-          return true;
-        } else {
-          String apiErr = 'HTTP ${aboutResp.statusCode}';
-          try {
-            final errBody = jsonDecode(aboutResp.body) as Map<String, dynamic>;
-            apiErr = errBody['error']?['message']?.toString() ?? apiErr;
-          } catch (_) {}
-          _lastErrorMessage = 'Google Drive token verification failed: $apiErr';
+          if (tokenInfoResp.statusCode == 200) {
+            final info = jsonDecode(tokenInfoResp.body) as Map<String, dynamic>;
+            final tokenEmail = info['email']?.toString();
+            if (tokenEmail != null && tokenEmail.isNotEmpty) {
+              verifiedEmail = tokenEmail;
+              verifiedName = tokenEmail.split('@').first;
+              verifiedViaTokenInfo = true;
+            }
+          }
+        } catch (_) {}
+
+        // Step 2: Query Drive v3 /about?fields=user for rich Google Drive profile info
+        try {
+          final aboutResp = await _httpClient.get(
+            Uri.parse('https://www.googleapis.com/drive/v3/about?fields=user'),
+            headers: {'Authorization': 'Bearer $cleanToken'},
+          );
+
+          if (aboutResp.statusCode == 200) {
+            final body = jsonDecode(aboutResp.body) as Map<String, dynamic>;
+            final userMap = body['user'] as Map<String, dynamic>?;
+            verifiedEmail =
+                userMap?['emailAddress']?.toString() ?? verifiedEmail;
+            verifiedName =
+                userMap?['displayName']?.toString() ?? verifiedName;
+
+            _currentUser = GoogleDriveAccount(
+              email: verifiedEmail ?? 'Google Drive User',
+              displayName:
+                  verifiedName ?? verifiedEmail?.split('@').first ?? 'User',
+              accessToken: cleanToken,
+              isDemoMode: false,
+            );
+            unawaited(_processQueue());
+            return true;
+          } else {
+            // If Drive API /about hit rate limiting/quota on queries per minute,
+            // but the token was verified via OAuth2 tokeninfo, login succeeds!
+            if (verifiedViaTokenInfo && verifiedEmail != null) {
+              _currentUser = GoogleDriveAccount(
+                email: verifiedEmail,
+                displayName: verifiedName ?? verifiedEmail.split('@').first,
+                accessToken: cleanToken,
+                isDemoMode: false,
+              );
+              unawaited(_processQueue());
+              return true;
+            }
+
+            String apiErr = 'HTTP ${aboutResp.statusCode}';
+            try {
+              final errBody = jsonDecode(aboutResp.body) as Map<String, dynamic>;
+              apiErr = errBody['error']?['message']?.toString() ?? apiErr;
+            } catch (_) {}
+            _lastErrorMessage = 'Google Drive token verification failed: $apiErr';
+            return false;
+          }
+        } catch (e) {
+          if (verifiedViaTokenInfo && verifiedEmail != null) {
+            _currentUser = GoogleDriveAccount(
+              email: verifiedEmail,
+              displayName: verifiedName ?? verifiedEmail.split('@').first,
+              accessToken: cleanToken,
+              isDemoMode: false,
+            );
+            unawaited(_processQueue());
+            return true;
+          }
+          _lastErrorMessage = 'Network error verifying Google Drive token: $e';
           return false;
         }
       } catch (e) {
-        _lastErrorMessage = 'Network error verifying Google Drive token: $e';
+        _lastErrorMessage = 'Google Drive token verification failed: $e';
         return false;
       }
     }
@@ -198,7 +250,7 @@ class GoogleDriveCloudSyncService implements CloudSyncService {
         'prompt': 'select_account consent',
       });
 
-      await openSystemUrl(authUrl.toString());
+      await openSystemUrl(authUrl.toString(), asPopup: true);
 
       String? authCode;
       await for (final HttpRequest request in server.timeout(
@@ -222,19 +274,32 @@ class GoogleDriveCloudSyncService implements CloudSyncService {
 <html>
 <head>
   <meta charset="utf-8">
-  <title>Signed in with Google · PhotoE-Zi</title>
+  <title>PhotoE-Zi · Signed in with Google</title>
+  <script>
+    function autoClose() {
+      try { window.opener = null; } catch(e){}
+      try { window.open('', '_self'); } catch(e){}
+      try { window.close(); } catch(e){}
+    }
+    autoClose();
+    setTimeout(autoClose, 300);
+    setTimeout(autoClose, 800);
+  </script>
 </head>
 <body style="background:#0F0F10;color:#F3F4F6;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;display:flex;align-items:center;justify-content:center;height:100vh;margin:0;">
   <div style="background:#1A1A1D;border:1px solid #2A2A2E;border-radius:14px;padding:36px 40px;text-align:center;max-width:380px;box-shadow:0 20px 40px rgba(0,0,0,0.5);">
     <div style="width:48px;height:48px;border-radius:50%;background:rgba(16,185,129,0.15);color:#10B981;display:inline-flex;align-items:center;justify-content:center;font-size:24px;margin-bottom:16px;">✓</div>
     <h2 style="margin:0 0 8px 0;font-size:18px;color:#F3F4F6;">Google Account Connected!</h2>
-    <p style="margin:0;color:#9CA3AF;font-size:13px;line-height:1.5;">You are now signed in to <b>PhotoE-Zi Google Drive</b>. You can close this browser tab.</p>
-    <script>setTimeout(function(){ window.close(); }, 1500);</script>
+    <p style="margin:0;color:#9CA3AF;font-size:13px;line-height:1.5;">You are now signed in to <b>PhotoE-Zi</b>. Closing this window...</p>
+    <button onclick="autoClose()" style="margin-top:16px;background:#27272A;border:1px solid #3F3F46;color:#E5E7EB;padding:8px 16px;border-radius:8px;font-size:12px;cursor:pointer;">Close Window</button>
   </div>
 </body>
 </html>
 ''');
           await request.response.close();
+          if (Platform.isMacOS) {
+            unawaited(_closeAuthBrowserWindowOnMac());
+          }
           break;
         } else if (error != null) {
           request.response.write('''
@@ -297,15 +362,49 @@ class GoogleDriveCloudSyncService implements CloudSyncService {
   }
 
   /// Opens a URL in the host OS browser (macOS `open`, Linux `xdg-open`, Windows `start`).
-  static Future<void> openSystemUrl(String url) async {
+  /// On macOS, if [asPopup] is true and Google Chrome is installed, opens Chrome in
+  /// standalone app mode (`--app=...`) to provide a dedicated, frameless login popup.
+  static Future<void> openSystemUrl(String url, {bool asPopup = false}) async {
     try {
       if (Platform.isMacOS) {
+        if (asPopup && Directory('/Applications/Google Chrome.app').existsSync()) {
+          final res = await Process.run('open', [
+            '-na',
+            '/Applications/Google Chrome.app',
+            '--args',
+            '--app=$url',
+            '--window-size=520,680',
+          ]);
+          if (res.exitCode == 0) return;
+        }
         await Process.run('open', [url]);
       } else if (Platform.isLinux) {
         await Process.run('xdg-open', [url]);
       } else if (Platform.isWindows) {
         await Process.run('cmd', ['/c', 'start', url]);
       }
+    } catch (_) {}
+  }
+
+  static Future<void> _closeAuthBrowserWindowOnMac() async {
+    try {
+      await Future<void>.delayed(const Duration(milliseconds: 600));
+      await Process.run('osascript', [
+        '-e',
+        '''
+        try
+          tell application "Google Chrome"
+            repeat with aWindow in windows
+              repeat with aTab in tabs of aWindow
+                if URL of aTab contains "127.0.0.1" or title of aTab contains "PhotoE-Zi" then
+                  close aTab
+                end if
+              end repeat
+            end repeat
+          end tell
+        end try
+        ''',
+      ]);
     } catch (_) {}
   }
 
@@ -375,6 +474,11 @@ class GoogleDriveCloudSyncService implements CloudSyncService {
         final err = jsonDecode(response.body) as Map<String, dynamic>;
         msg = err['error']?['message']?.toString() ?? msg;
       } catch (_) {}
+      if (msg.contains('Quota exceeded')) {
+        _setError(
+          'Google Drive query quota limit reached on shared Client ID. Please provide your personal GCP Client ID in Google Drive settings.',
+        );
+      }
       throw Exception('Failed creating folder "$folderName" on Google Drive: $msg');
     }
   }
@@ -543,6 +647,11 @@ class GoogleDriveCloudSyncService implements CloudSyncService {
         final err = jsonDecode(initResp.body) as Map<String, dynamic>;
         msg = err['error']?['message']?.toString() ?? msg;
       } catch (_) {}
+      if (msg.contains('Quota exceeded')) {
+        _setError(
+          'Google Drive query quota limit reached on shared Client ID. Please provide your personal GCP Client ID in Google Drive settings.',
+        );
+      }
       throw Exception('Google Drive upload init failed: $msg');
     }
 

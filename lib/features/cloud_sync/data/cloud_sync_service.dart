@@ -28,7 +28,8 @@ class GoogleDriveAccount {
 abstract class CloudSyncService {
   static const String driveFileScope =
       'https://www.googleapis.com/auth/drive.file';
-  static const String driveFullScope = 'https://www.googleapis.com/auth/drive';
+  static const String driveFullScope =
+      'https://www.googleapis.com/auth/drive https://www.googleapis.com/auth/userinfo.email openid';
 
   bool get isSignedIn;
   GoogleDriveAccount? get currentUser;

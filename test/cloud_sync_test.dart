@@ -313,5 +313,53 @@ void main() {
       );
       expect(uploadedByteLength, greaterThan(100));
     });
+
+    test(
+        'gracefully signs in via tokeninfo when /drive/v3/about hits 403 quota exceeded',
+        () async {
+      final mockHttp = MockClient((http.Request request) async {
+        // Tokeninfo succeeds on oauth2.googleapis.com
+        if (request.url.path.contains('tokeninfo')) {
+          return http.Response(
+            jsonEncode({
+              'email': 'quota.rescued@gmail.com',
+              'scope': 'https://www.googleapis.com/auth/drive',
+              'expires_in': 3599,
+            }),
+            200,
+          );
+        }
+
+        // /drive/v3/about returns 403 Quota exceeded
+        if (request.url.path.endsWith('/drive/v3/about')) {
+          return http.Response(
+            jsonEncode({
+              'error': {
+                'code': 403,
+                'message':
+                    "Quota exceeded for quota metric 'Queries' and limit 'Previous quota: Requests per minute' of service 'drive.googleapis.com' for consumer 'project_number:202264815644'.",
+              }
+            }),
+            403,
+          );
+        }
+
+        return http.Response('Not found', 404);
+      });
+
+      final quotaResilientService = GoogleDriveCloudSyncService(
+        db: db,
+        lutManager: lutManager,
+        lutBaker: const LutBakerService(),
+        httpClient: mockHttp,
+      );
+
+      final signedIn = await quotaResilientService.signIn(
+        accessToken: 'ya29.quota_test_token',
+      );
+      expect(signedIn, isTrue);
+      expect(quotaResilientService.currentUser?.email, 'quota.rescued@gmail.com');
+      expect(quotaResilientService.currentUser?.hasRealAccessToken, isTrue);
+    });
   });
 }
