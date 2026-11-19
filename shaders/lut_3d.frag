@@ -35,3 +35,4 @@ void main() {
   vec3 finalRgb = mix(origColor.rgb, lutRgb, clamp(uIntensity, 0.0, 1.0));
   fragColor = vec4(finalRgb, origColor.a);
 }
+

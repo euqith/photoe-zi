@@ -379,6 +379,21 @@ class TetherWorkspaceController extends StateNotifier<TetherSessionState> {
     return imported;
   }
 
+  Future<LutPreset> importCustomCubeFromString(
+    String cubeContent, {
+    required String presetName,
+  }) async {
+    final imported = await lutManager.importCustomCubeString(
+      cubeContent,
+      fileName: presetName,
+    );
+    if (mounted) {
+      state = state.copyWith(availablePresets: lutManager.allPresets);
+      await setActiveLut(imported.id);
+    }
+    return imported;
+  }
+
   Future<void> toggleFavorite(Photo photo) async {
     await db.togglePhotoFavorite(photo.id, !photo.isFavorite);
   }
@@ -444,17 +459,38 @@ final activePhotoHistogramProvider =
     FutureProvider.family<RgbHistogramData, String?>((ref, photoId) async {
   if (photoId == null) return RgbHistogramData.empty();
   final state = ref.watch(tetherControllerProvider);
+  final effectiveLut =
+      (state.isBeforeAfterPressed || state.activeLutId == 'none')
+          ? null
+          : state.activeLutData;
+  final effectiveIntensity =
+      (state.isBeforeAfterPressed || state.activeLutId == 'none')
+          ? 0.0
+          : state.lutIntensity;
+
   final previewBytes = state.inMemoryPreviews[photoId];
   if (previewBytes != null) {
-    return HistogramCalculator.computeFromBytes(previewBytes);
+    return HistogramCalculator.computeFromBytes(
+      previewBytes,
+      lutData: effectiveLut,
+      lutIntensity: effectiveIntensity,
+    );
   }
   final db = ref.watch(appDatabaseProvider);
   final photo = await db.getPhotoById(photoId);
   if (photo?.fullResPath != null) {
-    return HistogramCalculator.computeFromFilePath(photo!.fullResPath!);
+    return HistogramCalculator.computeFromFilePath(
+      photo!.fullResPath!,
+      lutData: effectiveLut,
+      lutIntensity: effectiveIntensity,
+    );
   }
   if (photo?.previewPath != null) {
-    return HistogramCalculator.computeFromFilePath(photo!.previewPath!);
+    return HistogramCalculator.computeFromFilePath(
+      photo!.previewPath!,
+      lutData: effectiveLut,
+      lutIntensity: effectiveIntensity,
+    );
   }
   return RgbHistogramData.empty();
 });

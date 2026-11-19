@@ -81,13 +81,21 @@ class LutPresetManager {
   Future<LutPreset> importCustomCubeFile(File sourceFile) async {
     final content = await sourceFile.readAsString();
     final rawBaseName = p.basenameWithoutExtension(sourceFile.path);
+    return importCustomCubeString(content, fileName: rawBaseName);
+  }
+
+  /// Imports a custom `.cube` LUT directly from string content and persists it in the preset directory.
+  Future<LutPreset> importCustomCubeString(
+    String content, {
+    required String fileName,
+  }) async {
     final sanitizedBase =
-        rawBaseName.replaceAll(RegExp(r'[^a-zA-Z0-9_\-]'), '_');
-    final parsed = CubeLutParser.parse(content, fallbackTitle: rawBaseName);
+        fileName.replaceAll(RegExp(r'[^a-zA-Z0-9_\-]'), '_');
+    final parsed = CubeLutParser.parse(content, fallbackTitle: fileName);
 
     final targetDir = await _resolveCustomLutDir();
     final targetPath = p.join(targetDir.path, '$sanitizedBase.cube');
-    await sourceFile.copy(targetPath);
+    await File(targetPath).writeAsString(content, flush: true);
 
     final id = 'custom_$sanitizedBase';
     _parsedCache[id] = parsed;
@@ -164,3 +172,4 @@ class LutPresetManager {
     return texture;
   }
 }
+

@@ -1,3 +1,5 @@
+import 'dart:io';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:photoe_zi/core/constants/studio_theme.dart';
@@ -242,25 +244,7 @@ class _TetherWorkspaceScreenState
             syncStatus: activeSyncStatus,
             onSelectLut: controller.setActiveLut,
             onIntensityChanged: controller.setLutIntensity,
-            onImportCube: () async {
-              try {
-                final imported =
-                    await controller.pickAndImportCustomCubeFile();
-                if (imported != null && mounted) {
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    SnackBar(
-                      content: Text('Imported & activated LUT: ${imported.name}'),
-                    ),
-                  );
-                }
-              } catch (e) {
-                if (mounted) {
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    SnackBar(content: Text('Failed to import .cube: $e')),
-                  );
-                }
-              }
-            },
+            onImportCube: () => _showImportCubeDialog(context, controller),
             onManualUpload: () {
               ScaffoldMessenger.of(context).showSnackBar(
                 const SnackBar(
@@ -469,6 +453,15 @@ class _TetherWorkspaceScreenState
                         value: sessionState.lutIntensity,
                         onChanged: controller.setLutIntensity,
                       ),
+                      SizedBox(
+                        width: double.infinity,
+                        child: OutlinedButton.icon(
+                          onPressed: () =>
+                              _showImportCubeDialog(context, controller),
+                          icon: const Icon(Icons.add_rounded, size: 14),
+                          label: const Text('Import .cube'),
+                        ),
+                      ),
                     ] else if (_selectedPortraitTab == 1) ...[
                       RgbHistogramWidget(
                         data: histogramData,
@@ -548,6 +541,263 @@ class _TetherWorkspaceScreenState
         ),
       ),
     );
+  }
+
+  Future<void> _showImportCubeDialog(
+    BuildContext context,
+    TetherWorkspaceController controller,
+  ) async {
+    final pathController = TextEditingController();
+    final nameController = TextEditingController(text: 'Portra 400 Warm');
+    String? errorMessage;
+
+    await showDialog<void>(
+      context: context,
+      builder: (ctx) => StatefulBuilder(
+        builder: (ctx, setDialogState) {
+          return AlertDialog(
+            backgroundColor: StudioColors.panelSurface,
+            title: const Row(
+              children: [
+                Icon(
+                  Icons.filter_b_and_w_rounded,
+                  size: 18,
+                  color: StudioColors.accentAmber,
+                ),
+                SizedBox(width: 8),
+                Text(
+                  'Import .cube 3D LUT',
+                  style: TextStyle(
+                    color: StudioColors.textPrimary,
+                    fontSize: 15,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+              ],
+            ),
+            content: SizedBox(
+              width: 380,
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  // Option 1: Native File Picker
+                  SizedBox(
+                    width: double.infinity,
+                    child: ElevatedButton.icon(
+                      key: const Key('btn_dialog_browse_cube'),
+                      onPressed: () async {
+                        try {
+                          final imported =
+                              await controller.pickAndImportCustomCubeFile();
+                          if (imported != null && ctx.mounted) {
+                            Navigator.of(ctx).pop();
+                            ScaffoldMessenger.of(context).showSnackBar(
+                              SnackBar(
+                                content: Text(
+                                  'Imported & activated LUT: ${imported.name}',
+                                ),
+                              ),
+                            );
+                          }
+                        } catch (e) {
+                          setDialogState(() {
+                            errorMessage =
+                                'Native file picker requires cold restart or use Path / Quick Preset below ($e)';
+                          });
+                        }
+                      },
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: StudioColors.accentAmber,
+                        foregroundColor: Colors.black,
+                      ),
+                      icon: const Icon(Icons.folder_open_rounded, size: 16),
+                      label: const Text('Browse .cube File from Device'),
+                    ),
+                  ),
+                  const Padding(
+                    padding: EdgeInsets.symmetric(vertical: 10),
+                    child: Divider(height: 1, color: StudioColors.panelBorder),
+                  ),
+                  // Option 2: Direct file path input
+                  const Text(
+                    'Or Load from Local File Path:',
+                    style: TextStyle(
+                      color: StudioColors.textSecondary,
+                      fontSize: 11,
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                  const SizedBox(height: 6),
+                  Row(
+                    children: [
+                      Expanded(
+                        child: TextField(
+                          key: const Key('input_cube_file_path'),
+                          controller: pathController,
+                          style: const TextStyle(
+                            color: StudioColors.textPrimary,
+                            fontSize: 12,
+                            fontFamily: StudioTheme.monospaceFont,
+                          ),
+                          decoration: const InputDecoration(
+                            isDense: true,
+                            hintText: '/path/to/my_lut.cube',
+                            border: OutlineInputBorder(),
+                          ),
+                        ),
+                      ),
+                      const SizedBox(width: 8),
+                      OutlinedButton(
+                        key: const Key('btn_load_cube_path'),
+                        onPressed: () async {
+                          final rawPath = pathController.text.trim();
+                          if (rawPath.isEmpty) {
+                            setDialogState(() {
+                              errorMessage = 'Please enter a .cube file path';
+                            });
+                            return;
+                          }
+                          final file = File(rawPath);
+                          if (!await file.exists()) {
+                            setDialogState(() {
+                              errorMessage = 'File not found: $rawPath';
+                            });
+                            return;
+                          }
+                          try {
+                            final imported =
+                                await controller.importCustomCubeFromFile(file);
+                            if (ctx.mounted) {
+                              Navigator.of(ctx).pop();
+                              ScaffoldMessenger.of(context).showSnackBar(
+                                SnackBar(
+                                  content: Text(
+                                    'Imported & activated LUT: ${imported.name}',
+                                  ),
+                                ),
+                              );
+                            }
+                          } catch (e) {
+                            setDialogState(() {
+                              errorMessage = 'Invalid .cube file: $e';
+                            });
+                          }
+                        },
+                        child: const Text('Load'),
+                      ),
+                    ],
+                  ),
+                  const Padding(
+                    padding: EdgeInsets.symmetric(vertical: 10),
+                    child: Divider(height: 1, color: StudioColors.panelBorder),
+                  ),
+                  // Option 3: Quick Custom .cube Generator for Instant Studio Testing
+                  const Text(
+                    'Quick Generate Custom .cube Preset:',
+                    style: TextStyle(
+                      color: StudioColors.textSecondary,
+                      fontSize: 11,
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                  const SizedBox(height: 6),
+                  Row(
+                    children: [
+                      Expanded(
+                        child: TextField(
+                          key: const Key('input_custom_lut_name'),
+                          controller: nameController,
+                          style: const TextStyle(
+                            color: StudioColors.textPrimary,
+                            fontSize: 12,
+                          ),
+                          decoration: const InputDecoration(
+                            isDense: true,
+                            labelText: 'Custom Preset Name',
+                            border: OutlineInputBorder(),
+                          ),
+                        ),
+                      ),
+                      const SizedBox(width: 8),
+                      OutlinedButton.icon(
+                        key: const Key('btn_generate_custom_cube'),
+                        onPressed: () async {
+                          final presetName = nameController.text.trim().isEmpty
+                              ? 'Portra 400 Warm'
+                              : nameController.text.trim();
+                          final cubeStr =
+                              _generatePortraCustomCubeString(presetName);
+                          final imported = await controller
+                              .importCustomCubeFromString(
+                            cubeStr,
+                            presetName: presetName,
+                          );
+                          if (ctx.mounted) {
+                            Navigator.of(ctx).pop();
+                            ScaffoldMessenger.of(context).showSnackBar(
+                              SnackBar(
+                                content: Text(
+                                  'Created & activated custom .cube: ${imported.name}',
+                                ),
+                              ),
+                            );
+                          }
+                        },
+                        icon: const Icon(Icons.auto_awesome_rounded, size: 14),
+                        label: const Text('Add .cube'),
+                      ),
+                    ],
+                  ),
+                  if (errorMessage != null) ...[
+                    const SizedBox(height: 10),
+                    Text(
+                      errorMessage!,
+                      style: const TextStyle(
+                        color: StudioColors.statusError,
+                        fontSize: 11,
+                      ),
+                    ),
+                  ],
+                ],
+              ),
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.of(ctx).pop(),
+                child: const Text('Close'),
+              ),
+            ],
+          );
+        },
+      ),
+    );
+  }
+
+  String _generatePortraCustomCubeString(String title) {
+    const int size = 17;
+    final buf = StringBuffer()
+      ..writeln('TITLE "$title"')
+      ..writeln('LUT_3D_SIZE $size')
+      ..writeln('DOMAIN_MIN 0.0 0.0 0.0')
+      ..writeln('DOMAIN_MAX 1.0 1.0 1.0');
+    for (int b = 0; b < size; b++) {
+      final bf = b / (size - 1);
+      for (int g = 0; g < size; g++) {
+        final gf = g / (size - 1);
+        for (int r = 0; r < size; r++) {
+          final rf = r / (size - 1);
+          // Warm golden Portra skin tones + lifted teal shadows
+          final ro = (0.04 + rf * 0.94 + 0.04 * (1.0 - bf)).clamp(0.0, 1.0);
+          final go = (0.03 + gf * 0.93 + 0.02 * rf).clamp(0.0, 1.0);
+          final bo = (0.05 + bf * 0.86).clamp(0.0, 1.0);
+          buf.writeln(
+            '${ro.toStringAsFixed(5)} ${go.toStringAsFixed(5)} ${bo.toStringAsFixed(5)}',
+          );
+        }
+      }
+    }
+    return buf.toString();
   }
 
   Future<void> _showNewSessionDialog(

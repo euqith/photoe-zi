@@ -4,6 +4,7 @@ import 'dart:io';
 import 'package:exif/exif.dart';
 import 'package:flutter/foundation.dart';
 import 'package:image/image.dart' as img;
+import 'package:photoe_zi/features/film_sim/domain/cube_lut_parser.dart';
 
 class ExifSummary {
   final String cameraModel;
@@ -113,16 +114,42 @@ class RgbHistogramData {
   }
 }
 
-RgbHistogramData _computeHistogramInIsolate(Uint8List imageBytes) {
+class _HistogramIsolatePayload {
+  final Uint8List imageBytes;
+  final int? lutSize;
+  final Float32List? lutRgbValues;
+  final double lutIntensity;
+
+  const _HistogramIsolatePayload({
+    required this.imageBytes,
+    this.lutSize,
+    this.lutRgbValues,
+    this.lutIntensity = 0.0,
+  });
+}
+
+RgbHistogramData _computeHistogramInIsolate(_HistogramIsolatePayload payload) {
   const int bins = 64;
   final rCounts = List<int>.filled(bins, 0);
   final gCounts = List<int>.filled(bins, 0);
   final bCounts = List<int>.filled(bins, 0);
   final lCounts = List<int>.filled(bins, 0);
 
-  final decoded = img.decodeImage(imageBytes);
+  final decoded = img.decodeImage(payload.imageBytes);
   if (decoded == null) {
     return RgbHistogramData.empty();
+  }
+
+  CubeLutData? lut;
+  if (payload.lutSize != null &&
+      payload.lutRgbValues != null &&
+      payload.lutIntensity > 0.005) {
+    lut = CubeLutData(
+      title: 'HistLUT',
+      size: payload.lutSize!,
+      rgbValues: payload.lutRgbValues!,
+      rgbaAtlasBytes: Uint8List(0),
+    );
   }
 
   // Sample with step to guarantee fast computation even on large images
@@ -132,9 +159,17 @@ RgbHistogramData _computeHistogramInIsolate(Uint8List imageBytes) {
   for (int y = 0; y < decoded.height; y += stepY) {
     for (int x = 0; x < decoded.width; x += stepX) {
       final pixel = decoded.getPixel(x, y);
-      final r = pixel.r.toInt().clamp(0, 255);
-      final g = pixel.g.toInt().clamp(0, 255);
-      final b = pixel.b.toInt().clamp(0, 255);
+      int r = pixel.r.toInt().clamp(0, 255);
+      int g = pixel.g.toInt().clamp(0, 255);
+      int b = pixel.b.toInt().clamp(0, 255);
+
+      if (lut != null) {
+        final mapped = lut.lookupRgb8(r, g, b, intensity: payload.lutIntensity);
+        r = mapped[0];
+        g = mapped[1];
+        b = mapped[2];
+      }
+
       final lum = (0.299 * r + 0.587 * g + 0.114 * b).round().clamp(0, 255);
 
       rCounts[(r * bins) ~/ 256]++;
@@ -164,18 +199,37 @@ class HistogramCalculator {
   HistogramCalculator._();
 
   /// Computes normalized 64-bin RGB + Luminance histogram in a background isolate
-  /// so the Flutter UI thread remains locked at 60fps.
-  static Future<RgbHistogramData> computeFromBytes(Uint8List bytes) {
-    return compute(_computeHistogramInIsolate, bytes);
+  /// (including active 3D LUT transformation and intensity) so the UI stays at 60fps.
+  static Future<RgbHistogramData> computeFromBytes(
+    Uint8List bytes, {
+    CubeLutData? lutData,
+    double lutIntensity = 1.0,
+  }) {
+    return compute(
+      _computeHistogramInIsolate,
+      _HistogramIsolatePayload(
+        imageBytes: bytes,
+        lutSize: lutData?.size,
+        lutRgbValues: lutData?.rgbValues,
+        lutIntensity: lutData != null ? lutIntensity : 0.0,
+      ),
+    );
   }
 
-  static Future<RgbHistogramData> computeFromFilePath(String path) async {
+  static Future<RgbHistogramData> computeFromFilePath(
+    String path, {
+    CubeLutData? lutData,
+    double lutIntensity = 1.0,
+  }) async {
     final file = File(path);
     if (!await file.exists()) {
       return RgbHistogramData.empty();
     }
     final bytes = await file.readAsBytes();
-    return compute(_computeHistogramInIsolate, bytes);
+    return computeFromBytes(
+      bytes,
+      lutData: lutData,
+      lutIntensity: lutIntensity,
+    );
   }
 }
-

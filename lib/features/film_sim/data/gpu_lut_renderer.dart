@@ -86,14 +86,32 @@ class _GpuLutImageRendererState extends State<GpuLutImageRenderer> {
 
     if (widget.bypassLut ||
         widget.intensity <= 0.005 ||
-        lutData == null ||
-        lutTex == null ||
-        prog == null ||
-        photoImg == null) {
+        lutData == null) {
       return Image.memory(
         widget.imageBytes,
         fit: BoxFit.contain,
         gaplessPlayback: true,
+      );
+    }
+
+    if (lutTex == null || prog == null || photoImg == null) {
+      // Fallback color matrix while shader is compiling or in headless test mode
+      final c0 = lutData.lookupRgb8(255, 0, 0, intensity: widget.intensity);
+      final c1 = lutData.lookupRgb8(0, 255, 0, intensity: widget.intensity);
+      final c2 = lutData.lookupRgb8(0, 0, 255, intensity: widget.intensity);
+      final blk = lutData.lookupRgb8(0, 0, 0, intensity: widget.intensity);
+      return ColorFiltered(
+        colorFilter: ColorFilter.matrix([
+          (c0[0] - blk[0]) / 255.0, (c1[0] - blk[0]) / 255.0, (c2[0] - blk[0]) / 255.0, 0, blk[0].toDouble(),
+          (c0[1] - blk[1]) / 255.0, (c1[1] - blk[1]) / 255.0, (c2[1] - blk[1]) / 255.0, 0, blk[1].toDouble(),
+          (c0[2] - blk[2]) / 255.0, (c1[2] - blk[2]) / 255.0, (c2[2] - blk[2]) / 255.0, 0, blk[2].toDouble(),
+          0, 0, 0, 1, 0,
+        ]),
+        child: Image.memory(
+          widget.imageBytes,
+          fit: BoxFit.contain,
+          gaplessPlayback: true,
+        ),
       );
     }
 

@@ -3,6 +3,7 @@ import 'dart:typed_data';
 
 import 'package:flutter_test/flutter_test.dart';
 import 'package:image/image.dart' as img;
+import 'package:photoe_zi/core/utils/exif_and_histogram_utils.dart';
 import 'package:photoe_zi/features/film_sim/data/lut_baker_service.dart';
 import 'package:photoe_zi/features/film_sim/data/lut_preset_manager.dart';
 import 'package:photoe_zi/features/film_sim/domain/cube_lut_parser.dart';
@@ -158,6 +159,17 @@ void main() {
       // Warm LUT boosts red (> 100) and lowers blue (< 150)
       expect(centerPixel.r, greaterThan(102));
       expect(centerPixel.b, lessThan(145));
+
+      // Verify Histogram changes dynamically when LUT is applied vs original (Fix #2.4 / Issue #29)
+      final origHist = await HistogramCalculator.computeFromBytes(rawJpeg);
+      final lutHist = await HistogramCalculator.computeFromBytes(
+        rawJpeg,
+        lutData: lutData,
+        lutIntensity: 1.0,
+      );
+      expect(lutHist.red, isNot(equals(origHist.red)));
+      expect(lutHist.blue, isNot(equals(origHist.blue)));
     });
   });
 }
+

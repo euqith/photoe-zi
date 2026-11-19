@@ -135,6 +135,14 @@ void main() {
       expect(find.text('FILM SIMULATION'), findsOneWidget);
       expect(find.text('INFO & EXIF'), findsOneWidget);
 
+      // Test clicking "+ Import .cube" opens responsive Import .cube 3D LUT dialog (Fix #2.4)
+      await tester.tap(find.byKey(const Key('btn_import_cube')));
+      await tester.pumpAndSettle();
+      expect(find.text('Import .cube 3D LUT'), findsOneWidget);
+      expect(find.byKey(const Key('btn_generate_custom_cube')), findsOneWidget);
+      await tester.tap(find.text('Close'));
+      await tester.pumpAndSettle();
+
       // Test Zen Mode hides Right Inspector
       await tester.tap(find.byKey(const Key('btn_zen_mode_toggle')));
       await tester.pump();
