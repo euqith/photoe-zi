@@ -1,6 +1,7 @@
 import 'dart:io';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:photoe_zi/core/constants/studio_theme.dart';
 import 'package:photoe_zi/core/database/app_database.dart';
@@ -673,35 +674,75 @@ class _TetherWorkspaceScreenState
       context: context,
       builder: (ctx) => StatefulBuilder(
         builder: (ctx, setDialogState) {
-          return AlertDialog(
+          return Dialog(
             backgroundColor: StudioColors.panelSurface,
-            title: const Row(
-              children: [
-                Icon(
-                  Icons.filter_b_and_w_rounded,
-                  size: 18,
-                  color: StudioColors.accentAmber,
-                ),
-                SizedBox(width: 8),
-                Text(
-                  'Import .cube 3D LUT',
-                  style: TextStyle(
-                    color: StudioColors.textPrimary,
-                    fontSize: 15,
-                    fontWeight: FontWeight.w600,
-                  ),
-                ),
-              ],
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(14),
+              side: const BorderSide(color: StudioColors.panelBorder),
             ),
-            content: SizedBox(
-              width: 380,
+            child: Container(
+              width: 420,
+              padding: const EdgeInsets.all(20),
               child: Column(
                 mainAxisSize: MainAxisSize.min,
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
+                  // Header
+                  Row(
+                    children: [
+                      Container(
+                        padding: const EdgeInsets.all(8),
+                        decoration: BoxDecoration(
+                          color:
+                              StudioColors.accentAmber.withValues(alpha: 0.14),
+                          borderRadius: BorderRadius.circular(8),
+                        ),
+                        child: const Icon(
+                          Icons.filter_b_and_w_rounded,
+                          size: 18,
+                          color: StudioColors.accentAmber,
+                        ),
+                      ),
+                      const SizedBox(width: 10),
+                      const Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              'Import .cube 3D LUT',
+                              style: TextStyle(
+                                color: StudioColors.textPrimary,
+                                fontSize: 15,
+                                fontWeight: FontWeight.w600,
+                              ),
+                            ),
+                            SizedBox(height: 2),
+                            Text(
+                              'Supports 17x17x17 & 33x33x33 Adobe/IRIDAS .cube files',
+                              style: TextStyle(
+                                color: StudioColors.textSecondary,
+                                fontSize: 11,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                      IconButton(
+                        onPressed: () => Navigator.of(ctx).pop(),
+                        icon: const Icon(
+                          Icons.close_rounded,
+                          size: 18,
+                          color: StudioColors.textSecondary,
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 16),
+
                   // Option 1: Native File Picker
                   SizedBox(
                     width: double.infinity,
+                    height: 38,
                     child: ElevatedButton.icon(
                       key: const Key('btn_dialog_browse_cube'),
                       onPressed: () async {
@@ -721,152 +762,159 @@ class _TetherWorkspaceScreenState
                         } catch (e) {
                           setDialogState(() {
                             errorMessage =
-                                'Native file picker requires cold restart or use Path / Quick Preset below ($e)';
+                                'Use local file path or quick preset generator below ($e)';
                           });
                         }
                       },
-                      style: ElevatedButton.styleFrom(
-                        backgroundColor: StudioColors.accentAmber,
-                        foregroundColor: Colors.black,
-                      ),
                       icon: const Icon(Icons.folder_open_rounded, size: 16),
                       label: const Text('Browse .cube File from Device'),
                     ),
                   ),
-                  const Padding(
-                    padding: EdgeInsets.symmetric(vertical: 10),
-                    child: Divider(height: 1, color: StudioColors.panelBorder),
-                  ),
-                  // Option 2: Direct file path input
-                  const Text(
-                    'Or Load from Local File Path:',
-                    style: TextStyle(
-                      color: StudioColors.textSecondary,
-                      fontSize: 11,
-                      fontWeight: FontWeight.w600,
+                  const SizedBox(height: 14),
+
+                  // Option 2: Direct file path input card
+                  Container(
+                    padding: const EdgeInsets.all(12),
+                    decoration: BoxDecoration(
+                      color: StudioColors.panelElevated,
+                      borderRadius: BorderRadius.circular(10),
+                      border: Border.all(color: StudioColors.panelBorder),
                     ),
-                  ),
-                  const SizedBox(height: 6),
-                  Row(
-                    children: [
-                      Expanded(
-                        child: TextField(
-                          key: const Key('input_cube_file_path'),
-                          controller: pathController,
-                          style: const TextStyle(
-                            color: StudioColors.textPrimary,
-                            fontSize: 12,
-                            fontFamily: StudioTheme.monospaceFont,
-                          ),
-                          decoration: const InputDecoration(
-                            isDense: true,
-                            hintText: '/path/to/my_lut.cube',
-                            border: OutlineInputBorder(),
-                          ),
-                        ),
-                      ),
-                      const SizedBox(width: 8),
-                      OutlinedButton(
-                        key: const Key('btn_load_cube_path'),
-                        onPressed: () async {
-                          final rawPath = pathController.text.trim();
-                          if (rawPath.isEmpty) {
-                            setDialogState(() {
-                              errorMessage = 'Please enter a .cube file path';
-                            });
-                            return;
-                          }
-                          final file = File(rawPath);
-                          if (!await file.exists()) {
-                            setDialogState(() {
-                              errorMessage = 'File not found: $rawPath';
-                            });
-                            return;
-                          }
-                          try {
-                            final imported =
-                                await controller.importCustomCubeFromFile(file);
-                            if (ctx.mounted) {
-                              Navigator.of(ctx).pop();
-                              ScaffoldMessenger.of(context).showSnackBar(
-                                SnackBar(
-                                  content: Text(
-                                    'Imported & activated LUT: ${imported.name}',
-                                  ),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        _fieldLabel('LOAD FROM LOCAL FILE PATH'),
+                        const SizedBox(height: 6),
+                        Row(
+                          children: [
+                            Expanded(
+                              child: TextField(
+                                key: const Key('input_cube_file_path'),
+                                controller: pathController,
+                                style: const TextStyle(
+                                  color: StudioColors.textPrimary,
+                                  fontSize: 12,
+                                  fontFamily: StudioTheme.monospaceFont,
                                 ),
-                              );
-                            }
-                          } catch (e) {
-                            setDialogState(() {
-                              errorMessage = 'Invalid .cube file: $e';
-                            });
-                          }
-                        },
-                        child: const Text('Load'),
-                      ),
-                    ],
-                  ),
-                  const Padding(
-                    padding: EdgeInsets.symmetric(vertical: 10),
-                    child: Divider(height: 1, color: StudioColors.panelBorder),
-                  ),
-                  // Option 3: Quick Custom .cube Generator for Instant Studio Testing
-                  const Text(
-                    'Quick Generate Custom .cube Preset:',
-                    style: TextStyle(
-                      color: StudioColors.textSecondary,
-                      fontSize: 11,
-                      fontWeight: FontWeight.w600,
-                    ),
-                  ),
-                  const SizedBox(height: 6),
-                  Row(
-                    children: [
-                      Expanded(
-                        child: TextField(
-                          key: const Key('input_custom_lut_name'),
-                          controller: nameController,
-                          style: const TextStyle(
-                            color: StudioColors.textPrimary,
-                            fontSize: 12,
-                          ),
-                          decoration: const InputDecoration(
-                            isDense: true,
-                            labelText: 'Custom Preset Name',
-                            border: OutlineInputBorder(),
-                          ),
-                        ),
-                      ),
-                      const SizedBox(width: 8),
-                      OutlinedButton.icon(
-                        key: const Key('btn_generate_custom_cube'),
-                        onPressed: () async {
-                          final presetName = nameController.text.trim().isEmpty
-                              ? 'Portra 400 Warm'
-                              : nameController.text.trim();
-                          final cubeStr =
-                              _generatePortraCustomCubeString(presetName);
-                          final imported = await controller
-                              .importCustomCubeFromString(
-                            cubeStr,
-                            presetName: presetName,
-                          );
-                          if (ctx.mounted) {
-                            Navigator.of(ctx).pop();
-                            ScaffoldMessenger.of(context).showSnackBar(
-                              SnackBar(
-                                content: Text(
-                                  'Created & activated custom .cube: ${imported.name}',
+                                decoration: const InputDecoration(
+                                  hintText: '/path/to/my_preset.cube',
                                 ),
                               ),
-                            );
-                          }
-                        },
-                        icon: const Icon(Icons.auto_awesome_rounded, size: 14),
-                        label: const Text('Add .cube'),
-                      ),
-                    ],
+                            ),
+                            const SizedBox(width: 8),
+                            OutlinedButton(
+                              key: const Key('btn_load_cube_path'),
+                              onPressed: () async {
+                                final rawPath = pathController.text.trim();
+                                if (rawPath.isEmpty) {
+                                  setDialogState(() {
+                                    errorMessage =
+                                        'Please enter a .cube file path';
+                                  });
+                                  return;
+                                }
+                                final file = File(rawPath);
+                                if (!await file.exists()) {
+                                  setDialogState(() {
+                                    errorMessage = 'File not found: $rawPath';
+                                  });
+                                  return;
+                                }
+                                try {
+                                  final imported = await controller
+                                      .importCustomCubeFromFile(file);
+                                  if (ctx.mounted) {
+                                    Navigator.of(ctx).pop();
+                                    ScaffoldMessenger.of(context).showSnackBar(
+                                      SnackBar(
+                                        content: Text(
+                                          'Imported & activated LUT: ${imported.name}',
+                                        ),
+                                      ),
+                                    );
+                                  }
+                                } catch (e) {
+                                  setDialogState(() {
+                                    errorMessage = 'Invalid .cube file: $e';
+                                  });
+                                }
+                              },
+                              child: const Text('Load'),
+                            ),
+                          ],
+                        ),
+                      ],
+                    ),
                   ),
+                  const SizedBox(height: 10),
+
+                  // Option 3: Quick Custom .cube Generator
+                  Container(
+                    padding: const EdgeInsets.all(12),
+                    decoration: BoxDecoration(
+                      color: StudioColors.panelElevated,
+                      borderRadius: BorderRadius.circular(10),
+                      border: Border.all(color: StudioColors.panelBorder),
+                    ),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        _fieldLabel('QUICK GENERATE CUSTOM .CUBE PRESET'),
+                        const SizedBox(height: 6),
+                        Row(
+                          children: [
+                            Expanded(
+                              child: TextField(
+                                key: const Key('input_custom_lut_name'),
+                                controller: nameController,
+                                style: const TextStyle(
+                                  color: StudioColors.textPrimary,
+                                  fontSize: 12,
+                                ),
+                                decoration: const InputDecoration(
+                                  hintText: 'e.g. Portra 400 Warm',
+                                ),
+                              ),
+                            ),
+                            const SizedBox(width: 8),
+                            OutlinedButton.icon(
+                              key: const Key('btn_generate_custom_cube'),
+                              onPressed: () async {
+                                final presetName =
+                                    nameController.text.trim().isEmpty
+                                        ? 'Portra 400 Warm'
+                                        : nameController.text.trim();
+                                final cubeStr =
+                                    _generatePortraCustomCubeString(presetName);
+                                final imported = await controller
+                                    .importCustomCubeFromString(
+                                  cubeStr,
+                                  presetName: presetName,
+                                );
+                                if (ctx.mounted) {
+                                  Navigator.of(ctx).pop();
+                                  ScaffoldMessenger.of(context).showSnackBar(
+                                    SnackBar(
+                                      content: Text(
+                                        'Created & activated custom .cube: ${imported.name}',
+                                      ),
+                                    ),
+                                  );
+                                }
+                              },
+                              icon: const Icon(
+                                Icons.auto_awesome_rounded,
+                                size: 14,
+                                color: StudioColors.accentAmber,
+                              ),
+                              label: const Text('Add .cube'),
+                            ),
+                          ],
+                        ),
+                      ],
+                    ),
+                  ),
+
                   if (errorMessage != null) ...[
                     const SizedBox(height: 10),
                     Text(
@@ -877,15 +925,17 @@ class _TetherWorkspaceScreenState
                       ),
                     ),
                   ],
+                  const SizedBox(height: 14),
+                  Align(
+                    alignment: Alignment.centerRight,
+                    child: TextButton(
+                      onPressed: () => Navigator.of(ctx).pop(),
+                      child: const Text('Close'),
+                    ),
+                  ),
                 ],
               ),
             ),
-            actions: [
-              TextButton(
-                onPressed: () => Navigator.of(ctx).pop(),
-                child: const Text('Close'),
-              ),
-            ],
           );
         },
       ),
@@ -905,7 +955,6 @@ class _TetherWorkspaceScreenState
         final gf = g / (size - 1);
         for (int r = 0; r < size; r++) {
           final rf = r / (size - 1);
-          // Warm golden Portra skin tones + lifted teal shadows
           final ro = (0.04 + rf * 0.94 + 0.04 * (1.0 - bf)).clamp(0.0, 1.0);
           final go = (0.03 + gf * 0.93 + 0.02 * rf).clamp(0.0, 1.0);
           final bo = (0.05 + bf * 0.86).clamp(0.0, 1.0);
@@ -926,27 +975,84 @@ class _TetherWorkspaceScreenState
     final driveLinkController = TextEditingController();
     await showDialog<void>(
       context: context,
-      builder: (ctx) => AlertDialog(
+      builder: (ctx) => Dialog(
         backgroundColor: StudioColors.panelSurface,
-        title: const Text(
-          'New Shooting Session',
-          style: TextStyle(color: StudioColors.textPrimary, fontSize: 15),
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(14),
+          side: const BorderSide(color: StudioColors.panelBorder),
         ),
-        content: SizedBox(
-          width: 360,
+        child: Container(
+          width: 400,
+          padding: const EdgeInsets.all(20),
           child: Column(
             mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
             children: [
+              Row(
+                children: [
+                  Container(
+                    padding: const EdgeInsets.all(8),
+                    decoration: BoxDecoration(
+                      color: StudioColors.accentAmber.withValues(alpha: 0.14),
+                      borderRadius: BorderRadius.circular(8),
+                    ),
+                    child: const Icon(
+                      Icons.create_new_folder_outlined,
+                      size: 18,
+                      color: StudioColors.accentAmber,
+                    ),
+                  ),
+                  const SizedBox(width: 10),
+                  const Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          'New Shooting Session',
+                          style: TextStyle(
+                            color: StudioColors.textPrimary,
+                            fontSize: 15,
+                            fontWeight: FontWeight.w600,
+                          ),
+                        ),
+                        SizedBox(height: 2),
+                        Text(
+                          'Creates a clean workspace & Google Drive session folder',
+                          style: TextStyle(
+                            color: StudioColors.textSecondary,
+                            fontSize: 11,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                  IconButton(
+                    onPressed: () => Navigator.of(ctx).pop(),
+                    icon: const Icon(
+                      Icons.close_rounded,
+                      size: 18,
+                      color: StudioColors.textSecondary,
+                    ),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 16),
+              _fieldLabel('SESSION NAME'),
+              const SizedBox(height: 6),
               TextField(
                 key: const Key('input_new_session_name'),
                 controller: textController,
-                style: const TextStyle(color: StudioColors.textPrimary),
+                style: const TextStyle(
+                  color: StudioColors.textPrimary,
+                  fontSize: 13,
+                ),
                 decoration: const InputDecoration(
-                  labelText: 'Session Name',
-                  hintText: 'e.g. Studio_A',
+                  hintText: 'e.g. Studio_A or Editorial_Lookbook',
                 ),
               ),
-              const SizedBox(height: 12),
+              const SizedBox(height: 14),
+              _fieldLabel('GOOGLE DRIVE FOLDER LINK / ID (OPTIONAL)'),
+              const SizedBox(height: 6),
               TextField(
                 key: const Key('input_new_session_drive_link'),
                 controller: driveLinkController,
@@ -956,35 +1062,35 @@ class _TetherWorkspaceScreenState
                   fontFamily: StudioTheme.monospaceFont,
                 ),
                 decoration: const InputDecoration(
-                  labelText: 'Google Drive Folder Link / ID (Optional)',
-                  hintText:
-                      'https://drive.google.com/drive/folders/... (leave blank to auto-create)',
+                  hintText: 'Leave empty to auto-create TetherApp/YYYY-MM-DD',
                 ),
+              ),
+              const SizedBox(height: 18),
+              Row(
+                mainAxisAlignment: MainAxisAlignment.end,
+                children: [
+                  TextButton(
+                    onPressed: () => Navigator.of(ctx).pop(),
+                    child: const Text('Cancel'),
+                  ),
+                  const SizedBox(width: 8),
+                  ElevatedButton.icon(
+                    key: const Key('btn_confirm_create_session'),
+                    onPressed: () {
+                      controller.createNewSession(
+                        textController.text,
+                        customDriveLinkOrId: driveLinkController.text,
+                      );
+                      Navigator.of(ctx).pop();
+                    },
+                    icon: const Icon(Icons.check_rounded, size: 16),
+                    label: const Text('Create Session'),
+                  ),
+                ],
               ),
             ],
           ),
         ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.of(ctx).pop(),
-            child: const Text('Cancel'),
-          ),
-          ElevatedButton(
-            key: const Key('btn_confirm_create_session'),
-            onPressed: () {
-              controller.createNewSession(
-                textController.text,
-                customDriveLinkOrId: driveLinkController.text,
-              );
-              Navigator.of(ctx).pop();
-            },
-            style: ElevatedButton.styleFrom(
-              backgroundColor: StudioColors.accentAmber,
-              foregroundColor: Colors.black,
-            ),
-            child: const Text('Create Session'),
-          ),
-        ],
       ),
     );
   }
@@ -1003,7 +1109,8 @@ class _TetherWorkspaceScreenState
     final linkController = TextEditingController(
       text: sessionState.shareableFolderUrl,
     );
-    int selectedAuthTab = 0; // 0: OAuth2 Access Token, 1: Browser OAuth Client ID, 2: Demo Sandbox
+    int selectedAuthTab =
+        0; // 0: Access Token, 1: Browser OAuth, 2: Demo Sandbox
     bool setAsDefaultParent = false;
     bool isAuthenticating = false;
     String? statusFeedback;
@@ -1014,53 +1121,104 @@ class _TetherWorkspaceScreenState
       builder: (ctx) => StatefulBuilder(
         builder: (ctx, setDialogState) {
           final currentState = ref.read(tetherControllerProvider);
-          return AlertDialog(
+          return Dialog(
             backgroundColor: StudioColors.panelSurface,
-            title: const Row(
-              children: [
-                Icon(
-                  Icons.add_to_drive_rounded,
-                  color: StudioColors.accentAmber,
-                  size: 20,
-                ),
-                SizedBox(width: 8),
-                Expanded(
-                  child: Text(
-                    'Google Drive OAuth 2.0 Sign-In & Folder Link',
-                    style: TextStyle(
-                      color: StudioColors.textPrimary,
-                      fontSize: 15,
-                      fontWeight: FontWeight.w600,
-                    ),
-                  ),
-                ),
-              ],
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(14),
+              side: const BorderSide(color: StudioColors.panelBorder),
             ),
-            content: SizedBox(
-              width: 440,
+            child: Container(
+              width: 460,
+              padding: const EdgeInsets.all(20),
               child: SingleChildScrollView(
                 child: Column(
                   mainAxisSize: MainAxisSize.min,
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    // Current Auth Status Banner
+                    // 1. Clean Studio Modal Header
+                    Row(
+                      children: [
+                        Container(
+                          padding: const EdgeInsets.all(9),
+                          decoration: BoxDecoration(
+                            color: StudioColors.accentAmber
+                                .withValues(alpha: 0.14),
+                            borderRadius: BorderRadius.circular(9),
+                          ),
+                          child: const Icon(
+                            Icons.add_to_drive_rounded,
+                            color: StudioColors.accentAmber,
+                            size: 20,
+                          ),
+                        ),
+                        const SizedBox(width: 12),
+                        const Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text(
+                                'Google Drive Cloud Sync',
+                                style: TextStyle(
+                                  color: StudioColors.textPrimary,
+                                  fontSize: 15.5,
+                                  fontWeight: FontWeight.w600,
+                                ),
+                              ),
+                              SizedBox(height: 2),
+                              Text(
+                                'Connect account & set destination folder for live tether sync',
+                                style: TextStyle(
+                                  color: StudioColors.textSecondary,
+                                  fontSize: 11,
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                        IconButton(
+                          onPressed: () => Navigator.of(ctx).pop(),
+                          icon: const Icon(
+                            Icons.close_rounded,
+                            size: 18,
+                            color: StudioColors.textSecondary,
+                          ),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 16),
+
+                    // 2. Account Connection Status Card
                     Container(
                       width: double.infinity,
-                      padding: const EdgeInsets.all(10),
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 14,
+                        vertical: 12,
+                      ),
                       decoration: BoxDecoration(
                         color: currentState.isGoogleSignedIn
-                            ? StudioColors.statusSuccess.withValues(alpha: 0.14)
-                            : StudioColors.panelElevated,
-                        borderRadius: BorderRadius.circular(6),
+                            ? StudioColors.statusSuccess.withValues(alpha: 0.10)
+                            : StudioColors.inputSurface,
+                        borderRadius: BorderRadius.circular(10),
                         border: Border.all(
                           color: currentState.isGoogleSignedIn
                               ? StudioColors.statusSuccess
+                                  .withValues(alpha: 0.5)
                               : StudioColors.panelBorder,
                         ),
                       ),
                       child: Row(
-                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
                         children: [
+                          Container(
+                            width: 10,
+                            height: 10,
+                            decoration: BoxDecoration(
+                              shape: BoxShape.circle,
+                              color: currentState.isGoogleSignedIn
+                                  ? StudioColors.statusSuccess
+                                  : StudioColors.textMuted,
+                            ),
+                          ),
+                          const SizedBox(width: 10),
                           Expanded(
                             child: Column(
                               crossAxisAlignment: CrossAxisAlignment.start,
@@ -1068,12 +1226,12 @@ class _TetherWorkspaceScreenState
                                 Text(
                                   currentState.isGoogleSignedIn
                                       ? (currentState.isGoogleDemoMode
-                                          ? 'Connected (Demo Sandbox Mode)'
-                                          : '✓ Connected to Google Drive API v3')
-                                      : 'Not Signed In to Google Drive',
+                                          ? 'Connected · Demo Sandbox Mode'
+                                          : 'Connected to Google Drive API v3')
+                                      : 'Not Connected to Google Drive',
                                   style: TextStyle(
-                                    fontSize: 12,
-                                    fontWeight: FontWeight.bold,
+                                    fontSize: 12.5,
+                                    fontWeight: FontWeight.w600,
                                     color: currentState.isGoogleSignedIn
                                         ? StudioColors.statusSuccess
                                         : StudioColors.textPrimary,
@@ -1082,8 +1240,8 @@ class _TetherWorkspaceScreenState
                                 const SizedBox(height: 2),
                                 Text(
                                   currentState.isGoogleSignedIn
-                                      ? 'Account: ${currentState.googleUserEmail}'
-                                      : 'Authenticate below so photos upload directly to your Google Drive folder.',
+                                      ? '${currentState.googleUserEmail}'
+                                      : 'Choose an authentication method below to enable live upload',
                                   style: const TextStyle(
                                     fontSize: 11,
                                     color: StudioColors.textSecondary,
@@ -1093,423 +1251,546 @@ class _TetherWorkspaceScreenState
                             ),
                           ),
                           if (currentState.isGoogleSignedIn)
-                            OutlinedButton(
-                              key: const Key('btn_google_sign_out'),
-                              onPressed: () async {
-                                await controller.signOutGoogleAccount();
-                                setDialogState(() {
-                                  statusFeedback = 'Signed out of Google Drive.';
-                                  isErrorFeedback = false;
-                                });
-                              },
-                              child: const Text('Sign Out'),
+                            SizedBox(
+                              height: 30,
+                              child: OutlinedButton(
+                                key: const Key('btn_google_sign_out'),
+                                onPressed: () async {
+                                  await controller.signOutGoogleAccount();
+                                  setDialogState(() {
+                                    statusFeedback =
+                                        'Disconnected from Google Drive.';
+                                    isErrorFeedback = false;
+                                  });
+                                },
+                                style: OutlinedButton.styleFrom(
+                                  padding: const EdgeInsets.symmetric(
+                                    horizontal: 10,
+                                  ),
+                                ),
+                                child: const Text(
+                                  'Sign Out',
+                                  style: TextStyle(fontSize: 11),
+                                ),
+                              ),
                             ),
+                        ],
+                      ),
+                    ),
+                    const SizedBox(height: 16),
+
+                    // 3. Authentication Card
+                    Container(
+                      padding: const EdgeInsets.all(14),
+                      decoration: BoxDecoration(
+                        color: StudioColors.panelElevated,
+                        borderRadius: BorderRadius.circular(10),
+                        border: Border.all(color: StudioColors.panelBorder),
+                      ),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Row(
+                            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                            children: [
+                              _fieldLabel('AUTHENTICATION METHOD'),
+                              if (selectedAuthTab == 0)
+                                InkWell(
+                                  onTap: () {
+                                    GoogleDriveCloudSyncService.openSystemUrl(
+                                      'https://developers.google.com/oauthplayground/#step1&apisSelect=https%3A%2F%2Fwww.googleapis.com%2Fauth%2Fdrive&url=https%3A%2F%2F&content_type=application%2Fjson&http_method=GET&useDefaultOauthCred=unchecked',
+                                    );
+                                  },
+                                  borderRadius: BorderRadius.circular(4),
+                                  child: const Padding(
+                                    padding: EdgeInsets.symmetric(
+                                      horizontal: 4,
+                                      vertical: 2,
+                                    ),
+                                    child: Row(
+                                      mainAxisSize: MainAxisSize.min,
+                                      children: [
+                                        Icon(
+                                          Icons.open_in_new_rounded,
+                                          size: 12,
+                                          color: StudioColors.accentAmber,
+                                        ),
+                                        SizedBox(width: 4),
+                                        Text(
+                                          'Get Token from OAuth Playground',
+                                          style: TextStyle(
+                                            fontSize: 10.5,
+                                            fontWeight: FontWeight.w600,
+                                            color: StudioColors.accentAmber,
+                                          ),
+                                        ),
+                                      ],
+                                    ),
+                                  ),
+                                ),
+                            ],
+                          ),
+                          const SizedBox(height: 8),
+
+                          // Segmented Control Pill Bar
+                          Container(
+                            padding: const EdgeInsets.all(3),
+                            decoration: BoxDecoration(
+                              color: StudioColors.inputSurface,
+                              borderRadius: BorderRadius.circular(8),
+                              border:
+                                  Border.all(color: StudioColors.panelBorder),
+                            ),
+                            child: Row(
+                              children: [
+                                Expanded(
+                                  child: _authMethodTab(
+                                    label: 'Access Token',
+                                    isSelected: selectedAuthTab == 0,
+                                    onTap: () => setDialogState(
+                                        () => selectedAuthTab = 0),
+                                  ),
+                                ),
+                                Expanded(
+                                  child: _authMethodTab(
+                                    label: 'Browser OAuth',
+                                    isSelected: selectedAuthTab == 1,
+                                    onTap: () => setDialogState(
+                                        () => selectedAuthTab = 1),
+                                  ),
+                                ),
+                                Expanded(
+                                  child: _authMethodTab(
+                                    label: 'Demo Mode',
+                                    isSelected: selectedAuthTab == 2,
+                                    onTap: () => setDialogState(
+                                        () => selectedAuthTab = 2),
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                          const SizedBox(height: 12),
+
+                          if (selectedAuthTab == 0) ...[
+                            TextField(
+                              key: const Key('input_google_access_token'),
+                              controller: tokenController,
+                              style: const TextStyle(
+                                color: StudioColors.textPrimary,
+                                fontSize: 12,
+                                fontFamily: StudioTheme.monospaceFont,
+                              ),
+                              decoration: InputDecoration(
+                                hintText:
+                                    'Paste OAuth 2.0 Access Token (ya29.a0...)',
+                                prefixIcon: const Icon(
+                                  Icons.vpn_key_outlined,
+                                  size: 16,
+                                  color: StudioColors.textMuted,
+                                ),
+                                suffixIcon: IconButton(
+                                  tooltip: 'Paste from Clipboard',
+                                  onPressed: () async {
+                                    final data = await Clipboard.getData(
+                                      Clipboard.kTextPlain,
+                                    );
+                                    if (data?.text != null) {
+                                      tokenController.text = data!.text!.trim();
+                                    }
+                                  },
+                                  icon: const Icon(
+                                    Icons.content_paste_rounded,
+                                    size: 15,
+                                    color: StudioColors.textSecondary,
+                                  ),
+                                ),
+                              ),
+                            ),
+                            const SizedBox(height: 10),
+                            SizedBox(
+                              width: double.infinity,
+                              height: 36,
+                              child: OutlinedButton.icon(
+                                key: const Key('btn_verify_oauth_token'),
+                                onPressed: isAuthenticating
+                                    ? null
+                                    : () async {
+                                        setDialogState(() {
+                                          isAuthenticating = true;
+                                          statusFeedback = null;
+                                        });
+                                        final ok = await controller
+                                            .signInGoogleWithAccessToken(
+                                          accessToken: tokenController.text,
+                                        );
+                                        setDialogState(() {
+                                          isAuthenticating = false;
+                                          isErrorFeedback = !ok;
+                                          statusFeedback = ok
+                                              ? '✓ Connected as ${ref.read(tetherControllerProvider).googleUserEmail}'
+                                              : (ref
+                                                      .read(
+                                                          tetherControllerProvider)
+                                                      .googleAuthError ??
+                                                  'Authentication failed');
+                                        });
+                                      },
+                                style: OutlinedButton.styleFrom(
+                                  side: const BorderSide(
+                                    color: StudioColors.accentAmber,
+                                  ),
+                                  foregroundColor: StudioColors.accentAmber,
+                                ),
+                                icon: isAuthenticating
+                                    ? const SizedBox(
+                                        width: 14,
+                                        height: 14,
+                                        child: CircularProgressIndicator(
+                                          strokeWidth: 2,
+                                          color: StudioColors.accentAmber,
+                                        ),
+                                      )
+                                    : const Icon(
+                                        Icons.verified_outlined,
+                                        size: 15,
+                                      ),
+                                label: const Text('Verify Access Token'),
+                              ),
+                            ),
+                          ] else if (selectedAuthTab == 1) ...[
+                            TextField(
+                              key: const Key('input_google_client_id'),
+                              controller: clientIdController,
+                              style: const TextStyle(
+                                color: StudioColors.textPrimary,
+                                fontSize: 12,
+                                fontFamily: StudioTheme.monospaceFont,
+                              ),
+                              decoration: const InputDecoration(
+                                hintText:
+                                    'GCP Desktop Client ID (*.apps.googleusercontent.com)',
+                                prefixIcon: Icon(
+                                  Icons.badge_outlined,
+                                  size: 16,
+                                  color: StudioColors.textMuted,
+                                ),
+                              ),
+                            ),
+                            const SizedBox(height: 8),
+                            TextField(
+                              key: const Key('input_google_client_secret'),
+                              controller: clientSecretController,
+                              obscureText: true,
+                              style: const TextStyle(
+                                color: StudioColors.textPrimary,
+                                fontSize: 12,
+                                fontFamily: StudioTheme.monospaceFont,
+                              ),
+                              decoration: const InputDecoration(
+                                hintText: 'Client Secret (Optional)',
+                                prefixIcon: Icon(
+                                  Icons.lock_outline_rounded,
+                                  size: 16,
+                                  color: StudioColors.textMuted,
+                                ),
+                              ),
+                            ),
+                            const SizedBox(height: 10),
+                            SizedBox(
+                              width: double.infinity,
+                              height: 36,
+                              child: OutlinedButton.icon(
+                                key: const Key('btn_launch_browser_oauth'),
+                                onPressed: isAuthenticating
+                                    ? null
+                                    : () async {
+                                        setDialogState(() {
+                                          isAuthenticating = true;
+                                          statusFeedback =
+                                              'Waiting for Google login in browser...';
+                                          isErrorFeedback = false;
+                                        });
+                                        final ok = await controller
+                                            .signInGoogleWithBrowserOAuth(
+                                          clientId: clientIdController.text,
+                                          clientSecret:
+                                              clientSecretController.text,
+                                        );
+                                        setDialogState(() {
+                                          isAuthenticating = false;
+                                          isErrorFeedback = !ok;
+                                          statusFeedback = ok
+                                              ? '✓ Signed in via Google Browser OAuth!'
+                                              : (ref
+                                                      .read(
+                                                          tetherControllerProvider)
+                                                      .googleAuthError ??
+                                                  'Browser OAuth failed');
+                                        });
+                                      },
+                                style: OutlinedButton.styleFrom(
+                                  side: const BorderSide(
+                                    color: StudioColors.accentAmber,
+                                  ),
+                                  foregroundColor: StudioColors.accentAmber,
+                                ),
+                                icon: const Icon(
+                                  Icons.open_in_browser_rounded,
+                                  size: 16,
+                                ),
+                                label:
+                                    const Text('Launch Google Sign-In Browser'),
+                              ),
+                            ),
+                          ] else ...[
+                            Row(
+                              children: [
+                                Expanded(
+                                  child: TextField(
+                                    key: const Key('input_google_email'),
+                                    controller: emailController,
+                                    style: const TextStyle(
+                                      color: StudioColors.textPrimary,
+                                      fontSize: 12,
+                                    ),
+                                    decoration: const InputDecoration(
+                                      hintText: 'Demo Photographer Email',
+                                      prefixIcon: Icon(
+                                        Icons.person_outline_rounded,
+                                        size: 16,
+                                        color: StudioColors.textMuted,
+                                      ),
+                                    ),
+                                  ),
+                                ),
+                                const SizedBox(width: 8),
+                                SizedBox(
+                                  height: 38,
+                                  child: OutlinedButton(
+                                    key: const Key('btn_google_sign_in'),
+                                    onPressed: () async {
+                                      await controller.signInGoogleAccount(
+                                        emailController.text,
+                                        isDemoMode: true,
+                                      );
+                                      setDialogState(() {
+                                        isErrorFeedback = false;
+                                        statusFeedback =
+                                            'Demo Sandbox Mode activated.';
+                                      });
+                                    },
+                                    style: OutlinedButton.styleFrom(
+                                      side: const BorderSide(
+                                        color: StudioColors.accentAmber,
+                                      ),
+                                      foregroundColor: StudioColors.accentAmber,
+                                    ),
+                                    child: const Text('Activate Demo'),
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ],
+
+                          if (statusFeedback != null) ...[
+                            const SizedBox(height: 10),
+                            Container(
+                              width: double.infinity,
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 10,
+                                vertical: 8,
+                              ),
+                              decoration: BoxDecoration(
+                                color: isErrorFeedback
+                                    ? StudioColors.statusError
+                                        .withValues(alpha: 0.12)
+                                    : StudioColors.statusSuccess
+                                        .withValues(alpha: 0.12),
+                                borderRadius: BorderRadius.circular(6),
+                                border: Border.all(
+                                  color: isErrorFeedback
+                                      ? StudioColors.statusError
+                                          .withValues(alpha: 0.5)
+                                      : StudioColors.statusSuccess
+                                          .withValues(alpha: 0.5),
+                                ),
+                              ),
+                              child: Text(
+                                statusFeedback!,
+                                style: TextStyle(
+                                  fontSize: 11,
+                                  color: isErrorFeedback
+                                      ? StudioColors.statusError
+                                      : StudioColors.statusSuccess,
+                                ),
+                              ),
+                            ),
+                          ],
                         ],
                       ),
                     ),
                     const SizedBox(height: 14),
 
-                    // OAuth 2.0 Authentication Form Tabs
-                    const Text(
-                      '1. GOOGLE OAUTH 2.0 AUTHENTICATION FORM',
-                      style: TextStyle(
-                        color: StudioColors.accentAmber,
-                        fontSize: 10.5,
-                        fontWeight: FontWeight.bold,
-                        letterSpacing: 0.5,
+                    // 4. Destination Folder Card
+                    Container(
+                      padding: const EdgeInsets.all(14),
+                      decoration: BoxDecoration(
+                        color: StudioColors.panelElevated,
+                        borderRadius: BorderRadius.circular(10),
+                        border: Border.all(color: StudioColors.panelBorder),
                       ),
-                    ),
-                    const SizedBox(height: 8),
-                    Row(
-                      children: [
-                        Expanded(
-                          child: _authMethodTab(
-                            label: 'OAuth Access Token',
-                            isSelected: selectedAuthTab == 0,
-                            onTap: () => setDialogState(() => selectedAuthTab = 0),
-                          ),
-                        ),
-                        const SizedBox(width: 6),
-                        Expanded(
-                          child: _authMethodTab(
-                            label: 'Browser OAuth Login',
-                            isSelected: selectedAuthTab == 1,
-                            onTap: () => setDialogState(() => selectedAuthTab = 1),
-                          ),
-                        ),
-                        const SizedBox(width: 6),
-                        Expanded(
-                          child: _authMethodTab(
-                            label: 'Demo Sandbox',
-                            isSelected: selectedAuthTab == 2,
-                            onTap: () => setDialogState(() => selectedAuthTab = 2),
-                          ),
-                        ),
-                      ],
-                    ),
-                    const SizedBox(height: 10),
-
-                    if (selectedAuthTab == 0) ...[
-                      const Text(
-                        'Paste a Google OAuth 2.0 Access Token (with https://www.googleapis.com/auth/drive or drive.file scope) to upload real files immediately:',
-                        style: TextStyle(
-                          color: StudioColors.textSecondary,
-                          fontSize: 11,
-                        ),
-                      ),
-                      const SizedBox(height: 6),
-                      Align(
-                        alignment: Alignment.centerLeft,
-                        child: TextButton.icon(
-                          onPressed: () {
-                            GoogleDriveCloudSyncService.openSystemUrl(
-                              'https://developers.google.com/oauthplayground/#step1&apisSelect=https%3A%2F%2Fwww.googleapis.com%2Fauth%2Fdrive&url=https%3A%2F%2F&content_type=application%2Fjson&http_method=GET&useDefaultOauthCred=unchecked',
-                            );
-                          },
-                          style: TextButton.styleFrom(
-                            padding: const EdgeInsets.symmetric(
-                              horizontal: 8,
-                              vertical: 4,
-                            ),
-                          ),
-                          icon: const Icon(
-                            Icons.open_in_new_rounded,
-                            size: 14,
-                            color: StudioColors.accentAmber,
-                          ),
-                          label: const Text(
-                            'Open Google OAuth 2.0 Playground to Get Token',
-                            style: TextStyle(
-                              fontSize: 11,
-                              color: StudioColors.accentAmber,
-                            ),
-                          ),
-                        ),
-                      ),
-                      const SizedBox(height: 4),
-                      TextField(
-                        key: const Key('input_google_access_token'),
-                        controller: tokenController,
-                        obscureText: false,
-                        style: const TextStyle(
-                          color: StudioColors.textPrimary,
-                          fontSize: 11.5,
-                          fontFamily: StudioTheme.monospaceFont,
-                        ),
-                        decoration: const InputDecoration(
-                          isDense: true,
-                          labelText: 'OAuth 2.0 Access Token (ya29.a0...)',
-                          hintText: 'ya29.a0AfH6SM...',
-                          border: OutlineInputBorder(),
-                        ),
-                      ),
-                      const SizedBox(height: 8),
-                      SizedBox(
-                        width: double.infinity,
-                        child: ElevatedButton.icon(
-                          key: const Key('btn_verify_oauth_token'),
-                          onPressed: isAuthenticating
-                              ? null
-                              : () async {
-                                  setDialogState(() {
-                                    isAuthenticating = true;
-                                    statusFeedback = null;
-                                  });
-                                  final ok = await controller
-                                      .signInGoogleWithAccessToken(
-                                    accessToken: tokenController.text,
-                                  );
-                                  setDialogState(() {
-                                    isAuthenticating = false;
-                                    isErrorFeedback = !ok;
-                                    statusFeedback = ok
-                                        ? '✓ Verified with Google Drive API v3 as ${ref.read(tetherControllerProvider).googleUserEmail}'
-                                        : (ref
-                                                .read(tetherControllerProvider)
-                                                .googleAuthError ??
-                                            'Authentication failed');
-                                  });
-                                },
-                          style: ElevatedButton.styleFrom(
-                            backgroundColor: StudioColors.accentAmber,
-                            foregroundColor: Colors.black,
-                          ),
-                          icon: isAuthenticating
-                              ? const SizedBox(
-                                  width: 14,
-                                  height: 14,
-                                  child: CircularProgressIndicator(
-                                    strokeWidth: 2,
-                                    color: Colors.black,
-                                  ),
-                                )
-                              : const Icon(Icons.verified_outlined, size: 16),
-                          label: const Text(
-                            'Verify Token & Sign In to Real Google Drive',
-                          ),
-                        ),
-                      ),
-                    ] else if (selectedAuthTab == 1) ...[
-                      const Text(
-                        'Enter your GCP Desktop OAuth 2.0 Client ID to open the Google Sign-In consent screen in your browser (http://127.0.0.1 loopback):',
-                        style: TextStyle(
-                          color: StudioColors.textSecondary,
-                          fontSize: 11,
-                        ),
-                      ),
-                      const SizedBox(height: 8),
-                      TextField(
-                        key: const Key('input_google_client_id'),
-                        controller: clientIdController,
-                        style: const TextStyle(
-                          color: StudioColors.textPrimary,
-                          fontSize: 11.5,
-                          fontFamily: StudioTheme.monospaceFont,
-                        ),
-                        decoration: const InputDecoration(
-                          isDense: true,
-                          labelText: 'OAuth 2.0 Client ID (*.apps.googleusercontent.com)',
-                          border: OutlineInputBorder(),
-                        ),
-                      ),
-                      const SizedBox(height: 8),
-                      TextField(
-                        key: const Key('input_google_client_secret'),
-                        controller: clientSecretController,
-                        obscureText: true,
-                        style: const TextStyle(
-                          color: StudioColors.textPrimary,
-                          fontSize: 11.5,
-                          fontFamily: StudioTheme.monospaceFont,
-                        ),
-                        decoration: const InputDecoration(
-                          isDense: true,
-                          labelText: 'Client Secret (Optional for Desktop PKCE)',
-                          border: OutlineInputBorder(),
-                        ),
-                      ),
-                      const SizedBox(height: 8),
-                      SizedBox(
-                        width: double.infinity,
-                        child: ElevatedButton.icon(
-                          key: const Key('btn_launch_browser_oauth'),
-                          onPressed: isAuthenticating
-                              ? null
-                              : () async {
-                                  setDialogState(() {
-                                    isAuthenticating = true;
-                                    statusFeedback =
-                                        'Waiting for Google Sign-In in browser...';
-                                    isErrorFeedback = false;
-                                  });
-                                  final ok = await controller
-                                      .signInGoogleWithBrowserOAuth(
-                                    clientId: clientIdController.text,
-                                    clientSecret: clientSecretController.text,
-                                  );
-                                  setDialogState(() {
-                                    isAuthenticating = false;
-                                    isErrorFeedback = !ok;
-                                    statusFeedback = ok
-                                        ? '✓ Signed in via Google Browser OAuth!'
-                                        : (ref
-                                                .read(tetherControllerProvider)
-                                                .googleAuthError ??
-                                            'Browser OAuth failed');
-                                  });
-                                },
-                          style: ElevatedButton.styleFrom(
-                            backgroundColor: StudioColors.accentAmber,
-                            foregroundColor: Colors.black,
-                          ),
-                          icon: const Icon(Icons.open_in_browser_rounded, size: 16),
-                          label: const Text('Sign In with Google in Browser'),
-                        ),
-                      ),
-                    ] else ...[
-                      const Text(
-                        'Demo Sandbox Mode simulates upload queue & QR Code sharing locally without sending files over the network:',
-                        style: TextStyle(
-                          color: StudioColors.textSecondary,
-                          fontSize: 11,
-                        ),
-                      ),
-                      const SizedBox(height: 8),
-                      Row(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
-                          Expanded(
-                            child: TextField(
-                              key: const Key('input_google_email'),
-                              controller: emailController,
-                              style: const TextStyle(
-                                color: StudioColors.textPrimary,
-                                fontSize: 12,
+                          _fieldLabel('DESTINATION GOOGLE DRIVE FOLDER'),
+                          const SizedBox(height: 8),
+                          TextField(
+                            key: const Key('input_gdrive_folder_link'),
+                            controller: linkController,
+                            style: const TextStyle(
+                              color: StudioColors.textPrimary,
+                              fontSize: 12,
+                              fontFamily: StudioTheme.monospaceFont,
+                            ),
+                            decoration: InputDecoration(
+                              hintText:
+                                  'https://drive.google.com/drive/folders/...',
+                              prefixIcon: const Icon(
+                                Icons.folder_special_outlined,
+                                size: 16,
+                                color: StudioColors.accentAmber,
                               ),
-                              decoration: const InputDecoration(
-                                isDense: true,
-                                labelText: 'Demo Photographer Email',
-                                border: OutlineInputBorder(),
+                              suffixIcon: IconButton(
+                                tooltip: 'Paste Folder Link',
+                                onPressed: () async {
+                                  final data = await Clipboard.getData(
+                                    Clipboard.kTextPlain,
+                                  );
+                                  if (data?.text != null) {
+                                    linkController.text = data!.text!.trim();
+                                  }
+                                },
+                                icon: const Icon(
+                                  Icons.content_paste_rounded,
+                                  size: 15,
+                                  color: StudioColors.textSecondary,
+                                ),
                               ),
                             ),
                           ),
-                          const SizedBox(width: 8),
-                          ElevatedButton(
-                            key: const Key('btn_google_sign_in'),
-                            onPressed: () async {
-                              await controller.signInGoogleAccount(
-                                emailController.text,
-                                isDemoMode: true,
-                              );
+                          const SizedBox(height: 10),
+                          InkWell(
+                            onTap: () {
                               setDialogState(() {
-                                isErrorFeedback = false;
-                                statusFeedback =
-                                    'Signed in (Demo Sandbox Mode).';
+                                setAsDefaultParent = !setAsDefaultParent;
                               });
                             },
-                            style: ElevatedButton.styleFrom(
-                              backgroundColor: StudioColors.accentAmber,
-                              foregroundColor: Colors.black,
+                            borderRadius: BorderRadius.circular(6),
+                            child: Padding(
+                              padding: const EdgeInsets.symmetric(vertical: 2),
+                              child: Row(
+                                children: [
+                                  SizedBox(
+                                    width: 20,
+                                    height: 20,
+                                    child: Checkbox(
+                                      value: setAsDefaultParent,
+                                      activeColor: StudioColors.accentAmber,
+                                      checkColor: Colors.black,
+                                      onChanged: (val) {
+                                        setDialogState(() {
+                                          setAsDefaultParent = val ?? false;
+                                        });
+                                      },
+                                    ),
+                                  ),
+                                  const SizedBox(width: 8),
+                                  const Expanded(
+                                    child: Text(
+                                      'Use as default parent folder for future sessions',
+                                      style: TextStyle(
+                                        color: StudioColors.textSecondary,
+                                        fontSize: 11.5,
+                                      ),
+                                    ),
+                                  ),
+                                ],
+                              ),
                             ),
-                            child: const Text('Enable Demo'),
                           ),
                         ],
                       ),
-                    ],
-
-                    if (statusFeedback != null) ...[
-                      const SizedBox(height: 8),
-                      Container(
-                        width: double.infinity,
-                        padding: const EdgeInsets.all(8),
-                        decoration: BoxDecoration(
-                          color: isErrorFeedback
-                              ? StudioColors.statusError.withValues(alpha: 0.14)
-                              : StudioColors.statusSuccess
-                                  .withValues(alpha: 0.14),
-                          borderRadius: BorderRadius.circular(4),
-                          border: Border.all(
-                            color: isErrorFeedback
-                                ? StudioColors.statusError
-                                : StudioColors.statusSuccess,
-                          ),
-                        ),
-                        child: Text(
-                          statusFeedback!,
-                          style: TextStyle(
-                            fontSize: 11,
-                            color: isErrorFeedback
-                                ? StudioColors.statusError
-                                : StudioColors.statusSuccess,
-                          ),
-                        ),
-                      ),
-                    ],
-
-                    const Padding(
-                      padding: EdgeInsets.symmetric(vertical: 12),
-                      child: Divider(height: 1, color: StudioColors.panelBorder),
                     ),
+                    const SizedBox(height: 18),
 
-                    // Register / Set Custom Google Drive Folder Link or ID
-                    const Text(
-                      '2. REGISTER GOOGLE DRIVE FOLDER LINK / FOLDER ID',
-                      style: TextStyle(
-                        color: StudioColors.accentAmber,
-                        fontSize: 10.5,
-                        fontWeight: FontWeight.bold,
-                        letterSpacing: 0.5,
-                      ),
-                    ),
-                    const SizedBox(height: 6),
-                    TextField(
-                      key: const Key('input_gdrive_folder_link'),
-                      controller: linkController,
-                      style: const TextStyle(
-                        color: StudioColors.textPrimary,
-                        fontSize: 12,
-                        fontFamily: StudioTheme.monospaceFont,
-                      ),
-                      decoration: const InputDecoration(
-                        isDense: true,
-                        labelText: 'Google Drive Folder URL or Folder ID',
-                        hintText:
-                            'https://drive.google.com/drive/folders/1AbCdEfGhIjK...',
-                        border: OutlineInputBorder(),
-                      ),
-                    ),
-                    const SizedBox(height: 6),
-                    CheckboxListTile(
-                      contentPadding: EdgeInsets.zero,
-                      dense: true,
-                      value: setAsDefaultParent,
-                      activeColor: StudioColors.accentAmber,
-                      title: const Text(
-                        'Also use as custom parent folder for future sessions',
-                        style: TextStyle(
-                          color: StudioColors.textSecondary,
-                          fontSize: 11,
+                    // 5. Footer Buttons
+                    Row(
+                      mainAxisAlignment: MainAxisAlignment.end,
+                      children: [
+                        TextButton(
+                          onPressed: () => Navigator.of(ctx).pop(),
+                          child: const Text('Cancel'),
                         ),
-                      ),
-                      onChanged: (val) {
-                        setDialogState(() {
-                          setAsDefaultParent = val ?? false;
-                        });
-                      },
+                        const SizedBox(width: 10),
+                        ElevatedButton.icon(
+                          key: const Key('btn_save_gdrive_link'),
+                          onPressed: () async {
+                            if (tokenController.text.trim().isNotEmpty) {
+                              final ok =
+                                  await controller.signInGoogleWithAccessToken(
+                                accessToken: tokenController.text,
+                              );
+                              if (!ok) {
+                                setDialogState(() {
+                                  isErrorFeedback = true;
+                                  statusFeedback = ref
+                                          .read(tetherControllerProvider)
+                                          .googleAuthError ??
+                                      'Invalid OAuth 2.0 Access Token';
+                                });
+                                return;
+                              }
+                            }
+
+                            await controller.registerCustomDriveFolderLink(
+                              linkController.text,
+                              setAsDefaultParent: setAsDefaultParent,
+                            );
+                            if (ctx.mounted) {
+                              Navigator.of(ctx).pop();
+                              ScaffoldMessenger.of(context).showSnackBar(
+                                const SnackBar(
+                                  content: Text(
+                                    'Google Drive settings saved & ready for sync!',
+                                  ),
+                                ),
+                              );
+                            }
+                          },
+                          icon: const Icon(Icons.check_rounded, size: 16),
+                          label: const Text('Save & Apply'),
+                        ),
+                      ],
                     ),
                   ],
                 ),
               ),
             ),
-            actions: [
-              TextButton(
-                onPressed: () => Navigator.of(ctx).pop(),
-                child: const Text('Close'),
-              ),
-              ElevatedButton.icon(
-                key: const Key('btn_save_gdrive_link'),
-                onPressed: () async {
-                  // If the user pasted an access token in Tab 0 and clicked Save directly, verify & sign in first
-                  if (tokenController.text.trim().isNotEmpty) {
-                    final ok = await controller.signInGoogleWithAccessToken(
-                      accessToken: tokenController.text,
-                    );
-                    if (!ok) {
-                      setDialogState(() {
-                        isErrorFeedback = true;
-                        statusFeedback = ref
-                                .read(tetherControllerProvider)
-                                .googleAuthError ??
-                            'Invalid OAuth 2.0 Access Token';
-                      });
-                      return;
-                    }
-                  }
-
-                  await controller.registerCustomDriveFolderLink(
-                    linkController.text,
-                    setAsDefaultParent: setAsDefaultParent,
-                  );
-                  if (ctx.mounted) {
-                    Navigator.of(ctx).pop();
-                    ScaffoldMessenger.of(context).showSnackBar(
-                      const SnackBar(
-                        content: Text(
-                          'Google Drive Folder Link saved & ready for upload!',
-                        ),
-                      ),
-                    );
-                  }
-                },
-                style: ElevatedButton.styleFrom(
-                  backgroundColor: StudioColors.accentAmber,
-                  foregroundColor: Colors.black,
-                ),
-                icon: const Icon(Icons.save_outlined, size: 15),
-                label: const Text('Save Folder Link'),
-              ),
-            ],
           );
         },
+      ),
+    );
+  }
+
+  Widget _fieldLabel(String text) {
+    return Text(
+      text,
+      style: const TextStyle(
+        color: StudioColors.textSecondary,
+        fontSize: 10,
+        fontWeight: FontWeight.w700,
+        letterSpacing: 0.7,
       ),
     );
   }
@@ -1521,25 +1802,23 @@ class _TetherWorkspaceScreenState
   }) {
     return InkWell(
       onTap: onTap,
-      borderRadius: BorderRadius.circular(4),
+      borderRadius: BorderRadius.circular(6),
       child: Container(
-        padding: const EdgeInsets.symmetric(vertical: 6, horizontal: 6),
+        padding: const EdgeInsets.symmetric(vertical: 7, horizontal: 6),
         alignment: Alignment.center,
         decoration: BoxDecoration(
-          color: isSelected
-              ? StudioColors.accentAmber.withValues(alpha: 0.18)
-              : StudioColors.panelElevated,
-          borderRadius: BorderRadius.circular(4),
+          color: isSelected ? StudioColors.panelElevated : Colors.transparent,
+          borderRadius: BorderRadius.circular(6),
           border: Border.all(
             color:
-                isSelected ? StudioColors.accentAmber : StudioColors.panelBorder,
+                isSelected ? StudioColors.accentAmber : Colors.transparent,
           ),
         ),
         child: Text(
           label,
           style: TextStyle(
-            fontSize: 10.5,
-            fontWeight: isSelected ? FontWeight.w600 : FontWeight.normal,
+            fontSize: 11,
+            fontWeight: isSelected ? FontWeight.w600 : FontWeight.w500,
             color: isSelected
                 ? StudioColors.accentAmber
                 : StudioColors.textSecondary,
