@@ -10,6 +10,7 @@ import 'package:image/image.dart' as img;
 import 'package:photoe_zi/core/database/app_database.dart';
 import 'package:photoe_zi/features/cloud_sync/data/cloud_sync_service.dart';
 import 'package:photoe_zi/features/cloud_sync/data/google_drive_cloud_sync_service.dart';
+import 'package:photoe_zi/features/cloud_sync/data/google_oauth_config_manager.dart';
 import 'package:photoe_zi/features/film_sim/data/lut_baker_service.dart';
 import 'package:photoe_zi/features/film_sim/data/lut_preset_manager.dart';
 
@@ -360,6 +361,58 @@ void main() {
       expect(signedIn, isTrue);
       expect(quotaResilientService.currentUser?.email, 'quota.rescued@gmail.com');
       expect(quotaResilientService.currentUser?.hasRealAccessToken, isTrue);
+    });
+  });
+
+  group(
+      'Issue #3.11 — PhotoE-Zi Dedicated Google OAuth2 Configuration & No Rclone Fallback',
+      () {
+    test(
+        'saves, loads, and masks dedicated PhotoE-Zi Google OAuth configuration locally',
+        () async {
+      final configManager = GoogleOAuthConfigManager(
+        configDirProvider: () async => tempDir,
+      );
+
+      var config = await configManager.loadConfig();
+      expect(config.isConfigured, isFalse);
+
+      await configManager.saveConfig(
+        clientId: 'photoezi-123456789.apps.googleusercontent.com',
+        clientSecret: 'photoezi-secret-xyz',
+      );
+
+      config = await configManager.loadConfig();
+      expect(config.isConfigured, isTrue);
+      expect(config.clientId, 'photoezi-123456789.apps.googleusercontent.com');
+      expect(config.clientSecret, 'photoezi-secret-xyz');
+      expect(config.maskedClientId, contains('...'));
+
+      await configManager.clearConfig();
+      config = await configManager.loadConfig();
+      expect(config.isConfigured, isFalse);
+    });
+
+    test(
+        'signInWithBrowserOAuth fails gracefully with clear message when no Client ID is configured and never uses rclone',
+        () async {
+      final configManager = GoogleOAuthConfigManager(
+        configDirProvider: () async => tempDir,
+      );
+      final service = GoogleDriveCloudSyncService(
+        db: db,
+        lutManager: lutManager,
+        lutBaker: const LutBakerService(),
+        oauthConfigManager: configManager,
+      );
+
+      final ok = await service.signInWithBrowserOAuth();
+      expect(ok, isFalse);
+      expect(
+        service.lastErrorMessage,
+        contains('PhotoE-Zi Google OAuth 2.0 Client ID is not configured yet'),
+      );
+      expect(service.lastErrorMessage, isNot(contains('rclone')));
     });
   });
 }

@@ -1108,9 +1108,13 @@ class _TetherWorkspaceScreenState
     final linkController = TextEditingController(
       text: sessionState.shareableFolderUrl,
     );
+    final initialConfig = await controller.getOAuthConfig();
+    if (!context.mounted) return;
+    clientIdController.text = initialConfig.clientId;
+    clientSecretController.text = initialConfig.clientSecret;
+    bool showAdvancedConfig = !initialConfig.isConfigured;
     bool setAsDefaultParent = false;
     bool isAuthenticating = false;
-    bool showAdvancedConfig = false;
     String? statusFeedback;
     bool isErrorFeedback = false;
 
@@ -1556,14 +1560,22 @@ class _TetherWorkspaceScreenState
                           crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
                             const Text(
-                              'Option A: Personal GCP Desktop Client ID (Guaranteed Quota)',
+                              'PhotoE-Zi Google OAuth 2.0 Credentials (Google Cloud)',
                               style: TextStyle(
                                 fontSize: 11,
                                 fontWeight: FontWeight.w600,
                                 color: StudioColors.accentAmber,
                               ),
                             ),
-                            const SizedBox(height: 4),
+                            const SizedBox(height: 3),
+                            const Text(
+                              'Enter your personal GCP Desktop Client ID so Google displays "PhotoE-Zi" during login and guarantees full upload quota.',
+                              style: TextStyle(
+                                fontSize: 10.5,
+                                color: StudioColors.textSecondary,
+                              ),
+                            ),
+                            const SizedBox(height: 6),
                             TextField(
                               key: const Key('input_google_client_id'),
                               controller: clientIdController,
@@ -1574,8 +1586,80 @@ class _TetherWorkspaceScreenState
                               ),
                               decoration: const InputDecoration(
                                 hintText:
-                                    'Custom Client ID (e.g. 12345...apps.googleusercontent.com)',
+                                    'GCP Client ID (e.g. 12345...apps.googleusercontent.com)',
                               ),
+                            ),
+                            const SizedBox(height: 6),
+                            TextField(
+                              key: const Key('input_google_client_secret'),
+                              controller: clientSecretController,
+                              style: const TextStyle(
+                                color: StudioColors.textPrimary,
+                                fontSize: 11.5,
+                                fontFamily: StudioTheme.monospaceFont,
+                              ),
+                              decoration: const InputDecoration(
+                                hintText:
+                                    'Client Secret (Optional for Desktop PKCE)',
+                              ),
+                            ),
+                            const SizedBox(height: 8),
+                            Row(
+                              children: [
+                                ElevatedButton.icon(
+                                  style: ElevatedButton.styleFrom(
+                                    backgroundColor: StudioColors.panelElevated,
+                                    padding: const EdgeInsets.symmetric(
+                                      horizontal: 10,
+                                      vertical: 8,
+                                    ),
+                                  ),
+                                  icon: const Icon(Icons.save_rounded, size: 13),
+                                  label: const Text(
+                                    'Save PhotoE-Zi Credentials',
+                                    style: TextStyle(fontSize: 10.5),
+                                  ),
+                                  onPressed: () async {
+                                    await controller.saveOAuthConfig(
+                                      clientId: clientIdController.text.trim(),
+                                      clientSecret:
+                                          clientSecretController.text.trim(),
+                                    );
+                                    setDialogState(() {
+                                      isErrorFeedback = false;
+                                      statusFeedback =
+                                          '✓ PhotoE-Zi OAuth credentials saved!';
+                                    });
+                                  },
+                                ),
+                                const Spacer(),
+                                InkWell(
+                                  onTap: () {
+                                    GoogleDriveCloudSyncService.openSystemUrl(
+                                      'https://console.cloud.google.com/apis/credentials',
+                                    );
+                                  },
+                                  child: const Row(
+                                    mainAxisSize: MainAxisSize.min,
+                                    children: [
+                                      Icon(
+                                        Icons.open_in_new_rounded,
+                                        size: 12,
+                                        color: StudioColors.accentAmber,
+                                      ),
+                                      SizedBox(width: 3),
+                                      Text(
+                                        'Open GCP Console',
+                                        style: TextStyle(
+                                          fontSize: 10.5,
+                                          color: StudioColors.accentAmber,
+                                          decoration: TextDecoration.underline,
+                                        ),
+                                      ),
+                                    ],
+                                  ),
+                                ),
+                              ],
                             ),
                             const SizedBox(height: 10),
                             const Text(
@@ -1695,6 +1779,13 @@ class _TetherWorkspaceScreenState
                         ElevatedButton.icon(
                           key: const Key('btn_save_gdrive_link'),
                           onPressed: () async {
+                            if (clientIdController.text.trim().isNotEmpty) {
+                              await controller.saveOAuthConfig(
+                                clientId: clientIdController.text.trim(),
+                                clientSecret: clientSecretController.text.trim(),
+                              );
+                            }
+
                             if (tokenController.text.trim().isNotEmpty) {
                               final ok =
                                   await controller.signInGoogleWithAccessToken(

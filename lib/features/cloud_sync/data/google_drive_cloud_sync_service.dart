@@ -7,6 +7,7 @@ import 'package:drift/drift.dart';
 import 'package:http/http.dart' as http;
 import 'package:photoe_zi/core/database/app_database.dart';
 import 'package:photoe_zi/features/cloud_sync/data/cloud_sync_service.dart';
+import 'package:photoe_zi/features/cloud_sync/data/google_oauth_config_manager.dart';
 import 'package:photoe_zi/features/film_sim/data/lut_baker_service.dart';
 import 'package:photoe_zi/features/film_sim/data/lut_preset_manager.dart';
 
@@ -14,6 +15,7 @@ class GoogleDriveCloudSyncService implements CloudSyncService {
   final AppDatabase db;
   final LutPresetManager lutManager;
   final LutBakerService lutBaker;
+  final GoogleOAuthConfigManager oauthConfigManager;
   final http.Client _httpClient;
   final Duration chunkDelay;
   final int maxRetries;
@@ -38,11 +40,13 @@ class GoogleDriveCloudSyncService implements CloudSyncService {
     required this.db,
     required this.lutManager,
     required this.lutBaker,
+    GoogleOAuthConfigManager? oauthConfigManager,
     http.Client? httpClient,
     this.chunkDelay = const Duration(milliseconds: 55),
     this.maxRetries = 3,
     bool startInDemoMode = false,
-  }) : _httpClient = httpClient ?? http.Client() {
+  })  : oauthConfigManager = oauthConfigManager ?? GoogleOAuthConfigManager(),
+        _httpClient = httpClient ?? http.Client() {
     if (startInDemoMode) {
       _currentUser = const GoogleDriveAccount(
         email: 'demo@photoe-zi.app',
@@ -202,27 +206,33 @@ class GoogleDriveCloudSyncService implements CloudSyncService {
     return false;
   }
 
-  static const String _defaultDesktopClientId =
-      '202264815644.apps.googleusercontent.com';
-  static const String _defaultDesktopClientSecret = 'X4Z3ca8xfWDb1Voo-F9a7ZxJ';
   static const int _defaultLoopbackPort = 53682;
 
-  /// Launches the official Google Sign-In OAuth 2.0 consent page in the system browser
-  /// (`https://accounts.google.com/o/oauth2/v2/auth`) and listens on `http://127.0.0.1:53682/`
-  /// (or an ephemeral port for custom Client IDs) to exchange the authorization code
-  /// for a live Google Drive API v3 `access_token`.
+  /// Launches the official Google Sign-In OAuth 2.0 consent page in the system browser / popup
+  /// (`https://accounts.google.com/o/oauth2/v2/auth`) and listens on `http://127.0.0.1:$port/`
+  /// to exchange the authorization code for a live Google Drive API v3 `access_token`.
+  /// Uses PhotoE-Zi's configured Google Cloud OAuth 2.0 Client credentials.
   @override
   Future<bool> signInWithBrowserOAuth({
-    required String clientId,
+    String? clientId,
     String? clientSecret,
   }) async {
     _lastErrorMessage = null;
-    final hasCustomClient = clientId.trim().isNotEmpty;
-    final effectiveClientId =
-        hasCustomClient ? clientId.trim() : _defaultDesktopClientId;
-    final effectiveClientSecret = hasCustomClient
-        ? (clientSecret?.trim() ?? '')
-        : _defaultDesktopClientSecret;
+
+    final savedConfig = await oauthConfigManager.loadConfig();
+    final effectiveClientId = (clientId != null && clientId.trim().isNotEmpty)
+        ? clientId.trim()
+        : savedConfig.clientId;
+    final effectiveClientSecret =
+        (clientSecret != null && clientSecret.trim().isNotEmpty)
+            ? clientSecret.trim()
+            : savedConfig.clientSecret;
+
+    if (effectiveClientId.isEmpty) {
+      _lastErrorMessage =
+          'PhotoE-Zi Google OAuth 2.0 Client ID is not configured yet. Please configure your personal GCP Client ID in Settings or enter an Access Token.';
+      return false;
+    }
 
     HttpServer? server;
     try {

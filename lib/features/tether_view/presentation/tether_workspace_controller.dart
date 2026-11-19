@@ -13,6 +13,7 @@ import 'package:photoe_zi/features/camera/data/mock_camera_driver.dart';
 import 'package:photoe_zi/features/camera/domain/base_camera_driver.dart';
 import 'package:photoe_zi/features/cloud_sync/data/cloud_sync_service.dart';
 import 'package:photoe_zi/features/cloud_sync/data/google_drive_cloud_sync_service.dart';
+import 'package:photoe_zi/features/cloud_sync/data/google_oauth_config_manager.dart';
 import 'package:photoe_zi/features/film_sim/data/lut_baker_service.dart';
 import 'package:photoe_zi/features/film_sim/data/lut_preset_manager.dart';
 import 'package:photoe_zi/features/film_sim/domain/cube_lut_parser.dart';
@@ -186,14 +187,21 @@ final lutBakerServiceProvider = Provider<LutBakerService>((ref) {
   return const LutBakerService();
 });
 
+final googleOAuthConfigManagerProvider =
+    Provider<GoogleOAuthConfigManager>((ref) {
+  return GoogleOAuthConfigManager();
+});
+
 final cloudSyncServiceProvider = Provider<GoogleDriveCloudSyncService>((ref) {
   final db = ref.watch(appDatabaseProvider);
   final lutManager = ref.watch(lutPresetManagerProvider);
   final lutBaker = ref.watch(lutBakerServiceProvider);
+  final oauthManager = ref.watch(googleOAuthConfigManagerProvider);
   final service = GoogleDriveCloudSyncService(
     db: db,
     lutManager: lutManager,
     lutBaker: lutBaker,
+    oauthConfigManager: oauthManager,
   );
   ref.onDispose(service.dispose);
   return service;
@@ -409,8 +417,26 @@ class TetherWorkspaceController extends StateNotifier<TetherSessionState> {
     return ok;
   }
 
-  Future<bool> signInGoogleWithBrowserOAuth({
+  Future<GoogleOAuthConfig> getOAuthConfig() async {
+    return await cloudSync.oauthConfigManager.loadConfig();
+  }
+
+  Future<GoogleOAuthConfig> saveOAuthConfig({
     required String clientId,
+    String? clientSecret,
+  }) async {
+    return await cloudSync.oauthConfigManager.saveConfig(
+      clientId: clientId,
+      clientSecret: clientSecret,
+    );
+  }
+
+  Future<void> clearOAuthConfig() async {
+    await cloudSync.oauthConfigManager.clearConfig();
+  }
+
+  Future<bool> signInGoogleWithBrowserOAuth({
+    String? clientId,
     String? clientSecret,
   }) async {
     final ok = await cloudSync.signInWithBrowserOAuth(

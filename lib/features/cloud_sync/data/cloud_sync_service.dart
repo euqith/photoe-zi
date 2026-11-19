@@ -44,11 +44,11 @@ abstract class CloudSyncService {
   });
 
   /// Starts a real OAuth 2.0 Loopback Browser Consent flow (`accounts.google.com`)
-  /// using the user's OAuth 2.0 Client ID (and optional Client Secret), opens the
-  /// system browser for Google login, captures the redirect code on `127.0.0.1`,
+  /// using PhotoE-Zi's configured OAuth 2.0 Client ID (or optional override),
+  /// opens the system browser/popup for Google login, captures the redirect code on `127.0.0.1`,
   /// and exchanges it for a live Google Drive `access_token`.
   Future<bool> signInWithBrowserOAuth({
-    required String clientId,
+    String? clientId,
     String? clientSecret,
   });
 
