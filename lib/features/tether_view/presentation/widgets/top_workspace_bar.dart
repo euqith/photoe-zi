@@ -13,6 +13,7 @@ class TopWorkspaceBar extends StatelessWidget {
   final int syncedCount;
   final int totalCount;
   final VoidCallback onToggleCamera;
+  final VoidCallback onManualMockCapture;
   final VoidCallback onToggleZenMode;
   final VoidCallback onToggleBeforeAfter;
   final VoidCallback onToggleRightInspector;
@@ -31,6 +32,7 @@ class TopWorkspaceBar extends StatelessWidget {
     required this.syncedCount,
     required this.totalCount,
     required this.onToggleCamera,
+    required this.onManualMockCapture,
     required this.onToggleZenMode,
     required this.onToggleBeforeAfter,
     required this.onToggleRightInspector,
@@ -148,6 +150,45 @@ class TopWorkspaceBar extends StatelessWidget {
                                 color: isConnected
                                     ? StudioColors.statusSuccess
                                     : StudioColors.textPrimary,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ),
+                    const SizedBox(width: 6),
+
+                    // Manual Mock Photo Generator Button
+                    InkWell(
+                      key: const Key('btn_manual_mock_capture'),
+                      onTap: onManualMockCapture,
+                      borderRadius: BorderRadius.circular(4),
+                      child: Container(
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 8,
+                          vertical: 4,
+                        ),
+                        decoration: BoxDecoration(
+                          color:
+                              StudioColors.accentAmber.withValues(alpha: 0.16),
+                          borderRadius: BorderRadius.circular(4),
+                          border: Border.all(color: StudioColors.accentAmber),
+                        ),
+                        child: const Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Icon(
+                              Icons.camera_alt_outlined,
+                              size: 13,
+                              color: StudioColors.accentAmber,
+                            ),
+                            SizedBox(width: 4),
+                            Text(
+                              '+ Mock Photo',
+                              style: TextStyle(
+                                fontSize: 11,
+                                fontWeight: FontWeight.w600,
+                                color: StudioColors.accentAmber,
                               ),
                             ),
                           ],

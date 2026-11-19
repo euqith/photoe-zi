@@ -178,3 +178,4 @@ class HistogramCalculator {
     return compute(_computeHistogramInIsolate, bytes);
   }
 }
+

@@ -211,3 +211,4 @@ class ExifMetadataPanel extends StatelessWidget {
     );
   }
 }
+

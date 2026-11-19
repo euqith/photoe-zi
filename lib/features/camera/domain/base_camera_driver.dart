@@ -51,3 +51,4 @@ abstract class BaseCameraDriver {
   Future<void> disconnect();
   Future<String> downloadFullResolution(String photoId, String targetDir);
 }
+

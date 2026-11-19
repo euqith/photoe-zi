@@ -98,6 +98,7 @@ Uint8List _generateStudioSampleJpeg(_SampleGenerationTask task) {
 class MockCameraDriver implements BaseCameraDriver {
   final Duration captureInterval;
   final Duration fullResDelay;
+  final int maxAutoShots;
   final Future<Directory> Function()? storageDirProvider;
 
   final StreamController<CameraConnectionState> _connectionController =
@@ -108,6 +109,7 @@ class MockCameraDriver implements BaseCameraDriver {
   CameraConnectionState _state = CameraConnectionState.disconnected;
   Timer? _captureTimer;
   int _shotCounter = 4020;
+  int _autoShotCount = 0;
   final Map<String, int> _photoShotIndices = {};
   final Map<int, Uint8List> _previewCache = {};
   final Map<int, Uint8List> _fullResCache = {};
@@ -115,6 +117,7 @@ class MockCameraDriver implements BaseCameraDriver {
   MockCameraDriver({
     this.captureInterval = const Duration(seconds: 3),
     this.fullResDelay = const Duration(milliseconds: 500),
+    this.maxAutoShots = 3,
     this.storageDirProvider,
   });
 
@@ -197,15 +200,27 @@ class MockCameraDriver implements BaseCameraDriver {
     await Future<void>.delayed(const Duration(milliseconds: 250));
     _setState(CameraConnectionState.connected);
 
-    // Trigger an immediate first shot so the user sees instant feedback,
-    // then continue periodically every 3 seconds.
-    unawaited(_simulateCapture());
+    _autoShotCount = 0;
+    if (maxAutoShots > 0) {
+      _autoShotCount++;
+      unawaited(_simulateCapture());
+    }
+
     _captureTimer?.cancel();
-    _captureTimer = Timer.periodic(captureInterval, (_) {
-      if (_state == CameraConnectionState.connected) {
+    if (_autoShotCount < maxAutoShots) {
+      _captureTimer = Timer.periodic(captureInterval, (timer) {
+        if (_state != CameraConnectionState.connected ||
+            _autoShotCount >= maxAutoShots) {
+          timer.cancel();
+          return;
+        }
+        _autoShotCount++;
         unawaited(_simulateCapture());
-      }
-    });
+        if (_autoShotCount >= maxAutoShots) {
+          timer.cancel();
+        }
+      });
+    }
     return true;
   }
 
@@ -217,9 +232,10 @@ class MockCameraDriver implements BaseCameraDriver {
   }
 
   Future<void> triggerManualShot() async {
-    if (_state == CameraConnectionState.connected) {
-      await _simulateCapture();
+    if (_state != CameraConnectionState.connected) {
+      _setState(CameraConnectionState.connected);
     }
+    await _simulateCapture();
   }
 
   Future<Directory> _resolveStorageDir() async {
@@ -334,3 +350,4 @@ class MockCameraDriver implements BaseCameraDriver {
     _photoController.close();
   }
 }
+

@@ -458,3 +458,4 @@ class _MainPhotoCanvasState extends State<MainPhotoCanvas> {
     );
   }
 }
+

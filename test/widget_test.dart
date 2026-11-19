@@ -48,6 +48,11 @@ void main() {
       expect(photos.last.fullResLocalPath, isNotNull);
       expect(File(photos.last.fullResLocalPath!).existsSync(), isTrue);
 
+      final countBeforeManual = photos.length;
+      await driver.triggerManualShot();
+      await Future<void>.delayed(const Duration(milliseconds: 200));
+      expect(photos.length, greaterThan(countBeforeManual));
+
       await driver.disconnect();
       expect(states.last, CameraConnectionState.disconnected);
 
@@ -125,6 +130,7 @@ void main() {
 
       // Verify Right Inspector Panel is visible on Landscape/Tablet
       expect(find.byKey(const Key('right_inspector_panel')), findsOneWidget);
+      expect(find.byKey(const Key('btn_manual_mock_capture')), findsOneWidget);
       expect(find.text('HISTOGRAM (RGB)'), findsOneWidget);
       expect(find.text('FILM SIMULATION'), findsOneWidget);
       expect(find.text('INFO & EXIF'), findsOneWidget);

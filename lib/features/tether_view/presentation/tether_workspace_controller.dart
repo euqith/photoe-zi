@@ -199,6 +199,13 @@ class TetherWorkspaceController extends StateNotifier<TetherSessionState> {
     }
   }
 
+  Future<void> triggerManualMockCapture() async {
+    final driver = cameraDriver;
+    if (driver is MockCameraDriver) {
+      await driver.triggerManualShot();
+    }
+  }
+
   void selectPhoto(String photoId, {required bool isLatestPhoto}) {
     // Clicking an older photo in the filmstrip temporarily pauses Lock Latest
     state = state.copyWith(

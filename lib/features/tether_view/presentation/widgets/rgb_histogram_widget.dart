@@ -187,3 +187,4 @@ class _RgbHistogramPainter extends CustomPainter {
     return oldDelegate.data != data;
   }
 }
+

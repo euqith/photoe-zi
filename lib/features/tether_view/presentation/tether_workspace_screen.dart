@@ -89,6 +89,7 @@ class _TetherWorkspaceScreenState
                   syncedCount: syncedCount,
                   totalCount: allPhotos.length,
                   onToggleCamera: controller.toggleCameraConnection,
+                  onManualMockCapture: controller.triggerManualMockCapture,
                   onToggleZenMode: controller.toggleZenMode,
                   onToggleBeforeAfter: () => controller.setBeforeAfterPressed(
                     !sessionState.isBeforeAfterPressed,
@@ -627,3 +628,4 @@ class _TetherWorkspaceScreenState
     );
   }
 }
+
