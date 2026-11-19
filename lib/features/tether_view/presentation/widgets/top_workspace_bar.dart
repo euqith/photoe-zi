@@ -19,6 +19,7 @@ class TopWorkspaceBar extends StatelessWidget {
   final VoidCallback onToggleRightInspector;
   final VoidCallback onShowSessionDialog;
   final VoidCallback onShowQrModal;
+  final VoidCallback? onOpenDriveSettings;
 
   const TopWorkspaceBar({
     super.key,
@@ -38,6 +39,7 @@ class TopWorkspaceBar extends StatelessWidget {
     required this.onToggleRightInspector,
     required this.onShowSessionDialog,
     required this.onShowQrModal,
+    this.onOpenDriveSettings,
   });
 
   @override
@@ -223,32 +225,37 @@ class TopWorkspaceBar extends StatelessWidget {
             ],
 
             const SizedBox(width: 6),
-            // Cloud Sync Progress Counter
-            Container(
-              padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 4),
-              decoration: BoxDecoration(
-                color: StudioColors.panelElevated,
-                borderRadius: BorderRadius.circular(4),
-                border: Border.all(color: StudioColors.panelBorder),
-              ),
-              child: Row(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  const Icon(
-                    Icons.cloud_done_outlined,
-                    size: 13,
-                    color: StudioColors.statusSuccess,
-                  ),
-                  const SizedBox(width: 4),
-                  Text(
-                    '$syncedCount/$totalCount',
-                    style: const TextStyle(
-                      fontSize: 10.5,
-                      color: StudioColors.textPrimary,
-                      fontFamily: StudioTheme.monospaceFont,
+            // Cloud Sync Progress Counter (Clickable -> opens Google Drive Settings & Folder Link setup)
+            InkWell(
+              key: const Key('btn_top_cloud_settings'),
+              onTap: onOpenDriveSettings,
+              borderRadius: BorderRadius.circular(4),
+              child: Container(
+                padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 4),
+                decoration: BoxDecoration(
+                  color: StudioColors.panelElevated,
+                  borderRadius: BorderRadius.circular(4),
+                  border: Border.all(color: StudioColors.panelBorder),
+                ),
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    const Icon(
+                      Icons.cloud_done_outlined,
+                      size: 13,
+                      color: StudioColors.statusSuccess,
                     ),
-                  ),
-                ],
+                    const SizedBox(width: 4),
+                    Text(
+                      '$syncedCount/$totalCount',
+                      style: const TextStyle(
+                        fontSize: 10.5,
+                        color: StudioColors.textPrimary,
+                        fontFamily: StudioTheme.monospaceFont,
+                      ),
+                    ),
+                  ],
+                ),
               ),
             ),
 

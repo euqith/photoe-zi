@@ -123,6 +123,26 @@ class AppDatabase extends _$AppDatabase {
   Future<List<UploadQueueData>> getUploadQueueForPhoto(String photoId) =>
       (select(uploadQueue)..where((t) => t.photoId.equals(photoId))).get();
 
+  Future<List<UploadQueueData>> getAllUploadQueueItems() =>
+      select(uploadQueue).get();
+
+  Future<List<UploadQueueData>> getPendingOrFailedUploads() =>
+      (select(uploadQueue)
+            ..where((t) =>
+                t.status.equals('pending') |
+                t.status.equals('bakingLut') |
+                t.status.equals('uploading') |
+                t.status.equals('failed')))
+          .get();
+
+  Future<void> resetFailedUploadsToPending() =>
+      (update(uploadQueue)..where((t) => t.status.equals('failed'))).write(
+        const UploadQueueCompanion(
+          status: Value('pending'),
+          progress: Value(0.0),
+        ),
+      );
+
   Future<void> updateUploadStatus({
     required String id,
     required String status,

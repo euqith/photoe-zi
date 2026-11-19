@@ -2,6 +2,8 @@ import 'package:flutter/material.dart';
 import 'package:photoe_zi/core/constants/studio_theme.dart';
 import 'package:photoe_zi/core/database/app_database.dart';
 import 'package:photoe_zi/core/utils/exif_and_histogram_utils.dart';
+import 'package:photoe_zi/features/cloud_sync/data/cloud_sync_service.dart';
+import 'package:photoe_zi/features/cloud_sync/presentation/drive_sync_panel.dart';
 import 'package:photoe_zi/features/film_sim/domain/lut_preset.dart';
 import 'package:photoe_zi/features/tether_view/presentation/widgets/exif_metadata_panel.dart';
 import 'package:photoe_zi/features/tether_view/presentation/widgets/rgb_histogram_widget.dart';
@@ -14,10 +16,26 @@ class RightInspectorPanel extends StatelessWidget {
   final String activeLutId;
   final double lutIntensity;
   final String syncStatus;
+  final bool isGoogleSignedIn;
+  final String? googleUserEmail;
+  final String sessionFolderPath;
+  final String shareableFolderUrl;
+  final AutoUploadMode autoUploadMode;
+  final UploadVariant uploadVariant;
+  final bool isOffline;
+  final int syncedCount;
+  final int queuedCount;
+  final int failedCount;
   final ValueChanged<String> onSelectLut;
   final ValueChanged<double> onIntensityChanged;
   final VoidCallback? onImportCube;
   final VoidCallback? onManualUpload;
+  final VoidCallback onOpenDriveSettings;
+  final ValueChanged<AutoUploadMode> onAutoUploadModeChanged;
+  final ValueChanged<UploadVariant> onUploadVariantChanged;
+  final ValueChanged<bool> onToggleOffline;
+  final VoidCallback onRetryFailed;
+  final VoidCallback onShowQrModal;
 
   const RightInspectorPanel({
     super.key,
@@ -28,10 +46,27 @@ class RightInspectorPanel extends StatelessWidget {
     required this.activeLutId,
     required this.lutIntensity,
     required this.syncStatus,
+    this.isGoogleSignedIn = true,
+    this.googleUserEmail = 'studio@photoe-zi.app',
+    this.sessionFolderPath = 'TetherApp / Studio_A',
+    this.shareableFolderUrl =
+        'https://drive.google.com/drive/folders/1GDrive_Studio_A?usp=sharing',
+    this.autoUploadMode = AutoUploadMode.all,
+    this.uploadVariant = UploadVariant.bakedLut,
+    this.isOffline = false,
+    this.syncedCount = 0,
+    this.queuedCount = 0,
+    this.failedCount = 0,
     required this.onSelectLut,
     required this.onIntensityChanged,
     this.onImportCube,
     this.onManualUpload,
+    required this.onOpenDriveSettings,
+    required this.onAutoUploadModeChanged,
+    required this.onUploadVariantChanged,
+    required this.onToggleOffline,
+    required this.onRetryFailed,
+    required this.onShowQrModal,
   });
 
   @override
@@ -88,8 +123,9 @@ class RightInspectorPanel extends StatelessWidget {
                           preset.name,
                           style: TextStyle(
                             fontSize: 12,
-                            fontWeight:
-                                isSelected ? FontWeight.w600 : FontWeight.normal,
+                            fontWeight: isSelected
+                                ? FontWeight.w600
+                                : FontWeight.normal,
                             color: isSelected
                                 ? StudioColors.accentAmber
                                 : StudioColors.textPrimary,
@@ -174,6 +210,27 @@ class RightInspectorPanel extends StatelessWidget {
             photo: activePhoto,
             syncStatus: syncStatus,
             onManualUpload: onManualUpload,
+          ),
+          const SizedBox(height: 16),
+          _sectionHeader('GOOGLE DRIVE CLOUD SYNC'),
+          const SizedBox(height: 8),
+          DriveSyncInspectorPanel(
+            isSignedIn: isGoogleSignedIn,
+            userEmail: googleUserEmail,
+            sessionFolderPath: sessionFolderPath,
+            shareableFolderUrl: shareableFolderUrl,
+            autoUploadMode: autoUploadMode,
+            uploadVariant: uploadVariant,
+            isOffline: isOffline,
+            syncedCount: syncedCount,
+            queuedCount: queuedCount,
+            failedCount: failedCount,
+            onOpenDriveSettings: onOpenDriveSettings,
+            onAutoUploadModeChanged: onAutoUploadModeChanged,
+            onUploadVariantChanged: onUploadVariantChanged,
+            onToggleOffline: onToggleOffline,
+            onRetryFailed: onRetryFailed,
+            onShowQrModal: onShowQrModal,
           ),
         ],
       ),

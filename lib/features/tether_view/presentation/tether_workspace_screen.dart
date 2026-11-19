@@ -5,6 +5,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:photoe_zi/core/constants/studio_theme.dart';
 import 'package:photoe_zi/core/database/app_database.dart';
 import 'package:photoe_zi/core/utils/exif_and_histogram_utils.dart';
+import 'package:photoe_zi/features/cloud_sync/presentation/drive_sync_panel.dart';
 import 'package:photoe_zi/features/tether_view/presentation/tether_workspace_controller.dart';
 import 'package:photoe_zi/features/tether_view/presentation/widgets/exif_metadata_panel.dart';
 import 'package:photoe_zi/features/tether_view/presentation/widgets/filmstrip_bar.dart';
@@ -66,6 +67,14 @@ class _TetherWorkspaceScreenState
 
     final syncedCount =
         allPhotos.where((p) => uploadStatusMap[p.id] == 'completed').length;
+    final failedCount =
+        allPhotos.where((p) => uploadStatusMap[p.id] == 'failed').length;
+    final queuedCount = allPhotos
+        .where((p) =>
+            uploadStatusMap[p.id] == 'pending' ||
+            uploadStatusMap[p.id] == 'bakingLut' ||
+            uploadStatusMap[p.id] == 'uploading')
+        .length;
 
     return Scaffold(
       backgroundColor: StudioColors.canvasBackground,
@@ -98,10 +107,29 @@ class _TetherWorkspaceScreenState
                   onToggleRightInspector: controller.toggleRightInspector,
                   onShowSessionDialog: () =>
                       _showNewSessionDialog(context, controller),
-                  onShowQrModal: () => _showQrPreviewDialog(
+                  onOpenDriveSettings: () => _showGoogleDriveSettingsDialog(
                     context,
-                    sessionState.activeSessionName,
+                    controller,
+                    sessionState,
                   ),
+                  onShowQrModal: () async {
+                    final shareUrl =
+                        await controller.prepareShareableSessionLink();
+                    if (!context.mounted) return;
+                    await showDialog<void>(
+                      context: context,
+                      builder: (_) => QrShareSessionModal(
+                        sessionName: sessionState.activeSessionName,
+                        sessionFolderPath: sessionState.sessionFolderPath,
+                        shareableUrl: shareUrl,
+                        onEditDriveLink: () => _showGoogleDriveSettingsDialog(
+                          context,
+                          controller,
+                          sessionState,
+                        ),
+                      ),
+                    );
+                  },
                 ),
 
                 // Main Content Area
@@ -117,6 +145,9 @@ class _TetherWorkspaceScreenState
                           uploadStatusMap: uploadStatusMap,
                           histogramData: histogramData,
                           isHistogramLoading: histogramAsync.isLoading,
+                          syncedCount: syncedCount,
+                          queuedCount: queuedCount,
+                          failedCount: failedCount,
                         )
                       : _buildPortraitResponsiveLayout(
                           sessionState: sessionState,
@@ -128,6 +159,9 @@ class _TetherWorkspaceScreenState
                           uploadStatusMap: uploadStatusMap,
                           histogramData: histogramData,
                           isHistogramLoading: histogramAsync.isLoading,
+                          syncedCount: syncedCount,
+                          queuedCount: queuedCount,
+                          failedCount: failedCount,
                         ),
                 ),
               ],
@@ -149,9 +183,12 @@ class _TetherWorkspaceScreenState
     required Map<String, String> uploadStatusMap,
     required RgbHistogramData histogramData,
     required bool isHistogramLoading,
+    required int syncedCount,
+    required int queuedCount,
+    required int failedCount,
   }) {
     final activeSyncStatus = activePhoto != null
-        ? (uploadStatusMap[activePhoto.id] ?? 'completed')
+        ? (uploadStatusMap[activePhoto.id] ?? 'pending')
         : 'completed';
 
     return Row(
@@ -242,13 +279,52 @@ class _TetherWorkspaceScreenState
             activeLutId: sessionState.activeLutId,
             lutIntensity: sessionState.lutIntensity,
             syncStatus: activeSyncStatus,
+            isGoogleSignedIn: sessionState.isGoogleSignedIn,
+            googleUserEmail: sessionState.googleUserEmail,
+            sessionFolderPath: sessionState.sessionFolderPath,
+            shareableFolderUrl: sessionState.shareableFolderUrl,
+            autoUploadMode: sessionState.autoUploadMode,
+            uploadVariant: sessionState.uploadVariant,
+            isOffline: sessionState.isOffline,
+            syncedCount: syncedCount,
+            queuedCount: queuedCount,
+            failedCount: failedCount,
             onSelectLut: controller.setActiveLut,
             onIntensityChanged: controller.setLutIntensity,
             onImportCube: () => _showImportCubeDialog(context, controller),
             onManualUpload: () {
+              if (activePhoto != null) {
+                controller.enqueuePhotoForUpload(activePhoto.id);
+              }
               ScaffoldMessenger.of(context).showSnackBar(
                 const SnackBar(
                   content: Text('Queued for Google Drive Upload'),
+                ),
+              );
+            },
+            onOpenDriveSettings: () => _showGoogleDriveSettingsDialog(
+              context,
+              controller,
+              sessionState,
+            ),
+            onAutoUploadModeChanged: controller.setAutoUploadMode,
+            onUploadVariantChanged: controller.setUploadVariant,
+            onToggleOffline: controller.setOfflineMode,
+            onRetryFailed: controller.retryFailedUploads,
+            onShowQrModal: () async {
+              final shareUrl = await controller.prepareShareableSessionLink();
+              if (!mounted) return;
+              await showDialog<void>(
+                context: context,
+                builder: (_) => QrShareSessionModal(
+                  sessionName: sessionState.activeSessionName,
+                  sessionFolderPath: sessionState.sessionFolderPath,
+                  shareableUrl: shareUrl,
+                  onEditDriveLink: () => _showGoogleDriveSettingsDialog(
+                    context,
+                    controller,
+                    sessionState,
+                  ),
                 ),
               );
             },
@@ -268,9 +344,12 @@ class _TetherWorkspaceScreenState
     required Map<String, String> uploadStatusMap,
     required RgbHistogramData histogramData,
     required bool isHistogramLoading,
+    required int syncedCount,
+    required int queuedCount,
+    required int failedCount,
   }) {
     final activeSyncStatus = activePhoto != null
-        ? (uploadStatusMap[activePhoto.id] ?? 'completed')
+        ? (uploadStatusMap[activePhoto.id] ?? 'pending')
         : 'completed';
 
     return Stack(
@@ -473,9 +552,47 @@ class _TetherWorkspaceScreenState
                         syncStatus: activeSyncStatus,
                       ),
                     ] else ...[
-                      ExifMetadataPanel(
-                        photo: activePhoto,
-                        syncStatus: activeSyncStatus,
+                      DriveSyncInspectorPanel(
+                        isSignedIn: sessionState.isGoogleSignedIn,
+                        userEmail: sessionState.googleUserEmail,
+                        sessionFolderPath: sessionState.sessionFolderPath,
+                        shareableFolderUrl: sessionState.shareableFolderUrl,
+                        autoUploadMode: sessionState.autoUploadMode,
+                        uploadVariant: sessionState.uploadVariant,
+                        isOffline: sessionState.isOffline,
+                        syncedCount: syncedCount,
+                        queuedCount: queuedCount,
+                        failedCount: failedCount,
+                        onOpenDriveSettings: () =>
+                            _showGoogleDriveSettingsDialog(
+                          context,
+                          controller,
+                          sessionState,
+                        ),
+                        onAutoUploadModeChanged: controller.setAutoUploadMode,
+                        onUploadVariantChanged: controller.setUploadVariant,
+                        onToggleOffline: controller.setOfflineMode,
+                        onRetryFailed: controller.retryFailedUploads,
+                        onShowQrModal: () async {
+                          final shareUrl =
+                              await controller.prepareShareableSessionLink();
+                          if (!context.mounted) return;
+                          await showDialog<void>(
+                            context: context,
+                            builder: (_) => QrShareSessionModal(
+                              sessionName: sessionState.activeSessionName,
+                              sessionFolderPath:
+                                  sessionState.sessionFolderPath,
+                              shareableUrl: shareUrl,
+                              onEditDriveLink: () =>
+                                  _showGoogleDriveSettingsDialog(
+                                context,
+                                controller,
+                                sessionState,
+                              ),
+                            ),
+                          );
+                        },
                       ),
                     ],
                   ],
@@ -805,6 +922,7 @@ class _TetherWorkspaceScreenState
     TetherWorkspaceController controller,
   ) async {
     final textController = TextEditingController(text: 'Studio_B');
+    final driveLinkController = TextEditingController();
     await showDialog<void>(
       context: context,
       builder: (ctx) => AlertDialog(
@@ -813,12 +931,36 @@ class _TetherWorkspaceScreenState
           'New Shooting Session',
           style: TextStyle(color: StudioColors.textPrimary, fontSize: 15),
         ),
-        content: TextField(
-          controller: textController,
-          style: const TextStyle(color: StudioColors.textPrimary),
-          decoration: const InputDecoration(
-            labelText: 'Session Name',
-            hintText: 'e.g. Studio_A',
+        content: SizedBox(
+          width: 360,
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              TextField(
+                key: const Key('input_new_session_name'),
+                controller: textController,
+                style: const TextStyle(color: StudioColors.textPrimary),
+                decoration: const InputDecoration(
+                  labelText: 'Session Name',
+                  hintText: 'e.g. Studio_A',
+                ),
+              ),
+              const SizedBox(height: 12),
+              TextField(
+                key: const Key('input_new_session_drive_link'),
+                controller: driveLinkController,
+                style: const TextStyle(
+                  color: StudioColors.textPrimary,
+                  fontSize: 12,
+                  fontFamily: StudioTheme.monospaceFont,
+                ),
+                decoration: const InputDecoration(
+                  labelText: 'Google Drive Folder Link / ID (Optional)',
+                  hintText:
+                      'https://drive.google.com/drive/folders/... (leave blank to auto-create)',
+                ),
+              ),
+            ],
           ),
         ),
         actions: [
@@ -827,8 +969,12 @@ class _TetherWorkspaceScreenState
             child: const Text('Cancel'),
           ),
           ElevatedButton(
+            key: const Key('btn_confirm_create_session'),
             onPressed: () {
-              controller.createNewSession(textController.text);
+              controller.createNewSession(
+                textController.text,
+                customDriveLinkOrId: driveLinkController.text,
+              );
               Navigator.of(ctx).pop();
             },
             style: ElevatedButton.styleFrom(
@@ -842,52 +988,193 @@ class _TetherWorkspaceScreenState
     );
   }
 
-  Future<void> _showQrPreviewDialog(
+  Future<void> _showGoogleDriveSettingsDialog(
     BuildContext context,
-    String sessionName,
+    TetherWorkspaceController controller,
+    TetherSessionState sessionState,
   ) async {
+    final emailController = TextEditingController(
+      text: sessionState.googleUserEmail ?? 'photographer@gmail.com',
+    );
+    final linkController = TextEditingController(
+      text: sessionState.shareableFolderUrl,
+    );
+    bool setAsDefaultParent = false;
+
     await showDialog<void>(
       context: context,
-      builder: (ctx) => AlertDialog(
-        backgroundColor: StudioColors.panelSurface,
-        title: Text(
-          'Share Session: $sessionName',
-          style: const TextStyle(color: StudioColors.textPrimary, fontSize: 15),
-        ),
-        content: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Container(
-              width: 160,
-              height: 160,
-              alignment: Alignment.center,
-              decoration: BoxDecoration(
-                color: Colors.white,
-                borderRadius: BorderRadius.circular(8),
-              ),
-              child: const Icon(
-                Icons.qr_code_2_rounded,
-                size: 132,
-                color: Colors.black,
+      builder: (ctx) => StatefulBuilder(
+        builder: (ctx, setDialogState) {
+          return AlertDialog(
+            backgroundColor: StudioColors.panelSurface,
+            title: const Row(
+              children: [
+                Icon(
+                  Icons.add_to_drive_rounded,
+                  color: StudioColors.accentAmber,
+                  size: 20,
+                ),
+                SizedBox(width: 8),
+                Text(
+                  'Google Drive Cloud Sync & Folder Link',
+                  style: TextStyle(
+                    color: StudioColors.textPrimary,
+                    fontSize: 15,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+              ],
+            ),
+            content: SizedBox(
+              width: 400,
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  // Google Account OAuth 2.0 Sign-In / Sign-Out (Issue #3.1)
+                  const Text(
+                    'GOOGLE ACCOUNT (OAuth 2.0 · scope: drive.file)',
+                    style: TextStyle(
+                      color: StudioColors.textMuted,
+                      fontSize: 10,
+                      fontWeight: FontWeight.bold,
+                    ),
+                  ),
+                  const SizedBox(height: 6),
+                  Row(
+                    children: [
+                      Expanded(
+                        child: TextField(
+                          key: const Key('input_google_email'),
+                          controller: emailController,
+                          style: const TextStyle(
+                            color: StudioColors.textPrimary,
+                            fontSize: 12,
+                          ),
+                          decoration: const InputDecoration(
+                            isDense: true,
+                            labelText: 'Google Account Email',
+                            border: OutlineInputBorder(),
+                          ),
+                        ),
+                      ),
+                      const SizedBox(width: 8),
+                      if (sessionState.isGoogleSignedIn)
+                        OutlinedButton(
+                          key: const Key('btn_google_sign_out'),
+                          onPressed: () async {
+                            await controller.signOutGoogleAccount();
+                            if (ctx.mounted) {
+                              Navigator.of(ctx).pop();
+                            }
+                          },
+                          child: const Text('Sign Out'),
+                        )
+                      else
+                        ElevatedButton(
+                          key: const Key('btn_google_sign_in'),
+                          onPressed: () async {
+                            await controller
+                                .signInGoogleAccount(emailController.text);
+                            if (ctx.mounted) {
+                              Navigator.of(ctx).pop();
+                            }
+                          },
+                          style: ElevatedButton.styleFrom(
+                            backgroundColor: StudioColors.accentAmber,
+                            foregroundColor: Colors.black,
+                          ),
+                          child: const Text('Sign In'),
+                        ),
+                    ],
+                  ),
+                  const Padding(
+                    padding: EdgeInsets.symmetric(vertical: 12),
+                    child: Divider(height: 1, color: StudioColors.panelBorder),
+                  ),
+
+                  // Register / Set Custom Google Drive Folder Link or ID
+                  const Text(
+                    'REGISTER GOOGLE DRIVE FOLDER LINK / FOLDER ID',
+                    style: TextStyle(
+                      color: StudioColors.textMuted,
+                      fontSize: 10,
+                      fontWeight: FontWeight.bold,
+                    ),
+                  ),
+                  const SizedBox(height: 6),
+                  TextField(
+                    key: const Key('input_gdrive_folder_link'),
+                    controller: linkController,
+                    style: const TextStyle(
+                      color: StudioColors.textPrimary,
+                      fontSize: 12,
+                      fontFamily: StudioTheme.monospaceFont,
+                    ),
+                    decoration: const InputDecoration(
+                      isDense: true,
+                      labelText: 'Google Drive Folder URL or Folder ID',
+                      hintText:
+                          'https://drive.google.com/drive/folders/1AbCdEfGhIjK...',
+                      border: OutlineInputBorder(),
+                    ),
+                  ),
+                  const SizedBox(height: 6),
+                  CheckboxListTile(
+                    contentPadding: EdgeInsets.zero,
+                    dense: true,
+                    value: setAsDefaultParent,
+                    activeColor: StudioColors.accentAmber,
+                    title: const Text(
+                      'Also use as custom parent folder for future sessions',
+                      style: TextStyle(
+                        color: StudioColors.textSecondary,
+                        fontSize: 11,
+                      ),
+                    ),
+                    onChanged: (val) {
+                      setDialogState(() {
+                        setAsDefaultParent = val ?? false;
+                      });
+                    },
+                  ),
+                ],
               ),
             ),
-            const SizedBox(height: 12),
-            Text(
-              'TetherApp / 2026-11-19_$sessionName',
-              style: const TextStyle(
-                color: StudioColors.textSecondary,
-                fontSize: 11,
-                fontFamily: StudioTheme.monospaceFont,
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.of(ctx).pop(),
+                child: const Text('Cancel'),
               ),
-            ),
-          ],
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.of(ctx).pop(),
-            child: const Text('Close'),
-          ),
-        ],
+              ElevatedButton.icon(
+                key: const Key('btn_save_gdrive_link'),
+                onPressed: () async {
+                  if (!sessionState.isGoogleSignedIn) {
+                    await controller.signInGoogleAccount(emailController.text);
+                  }
+                  await controller.registerCustomDriveFolderLink(
+                    linkController.text,
+                    setAsDefaultParent: setAsDefaultParent,
+                  );
+                  if (ctx.mounted) {
+                    Navigator.of(ctx).pop();
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      const SnackBar(
+                        content: Text('Google Drive Folder Link saved & synced!'),
+                      ),
+                    );
+                  }
+                },
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: StudioColors.accentAmber,
+                  foregroundColor: Colors.black,
+                ),
+                icon: const Icon(Icons.save_outlined, size: 15),
+                label: const Text('Save Drive Link'),
+              ),
+            ],
+          );
+        },
       ),
     );
   }

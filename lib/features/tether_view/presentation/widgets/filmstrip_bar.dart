@@ -460,6 +460,7 @@ class _FilmstripBarState extends State<FilmstripBar> {
           ),
         );
       case 'uploading':
+      case 'bakingLut':
         return const SizedBox(
           width: 8,
           height: 8,
