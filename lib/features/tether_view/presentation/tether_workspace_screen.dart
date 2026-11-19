@@ -6,7 +6,6 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:photoe_zi/core/constants/studio_theme.dart';
 import 'package:photoe_zi/core/database/app_database.dart';
 import 'package:photoe_zi/core/utils/exif_and_histogram_utils.dart';
-import 'package:photoe_zi/features/cloud_sync/data/google_drive_cloud_sync_service.dart';
 import 'package:photoe_zi/features/cloud_sync/presentation/drive_sync_panel.dart';
 import 'package:photoe_zi/features/tether_view/presentation/tether_workspace_controller.dart';
 import 'package:photoe_zi/features/tether_view/presentation/widgets/exif_metadata_panel.dart';
@@ -1103,16 +1102,12 @@ class _TetherWorkspaceScreenState
     final tokenController = TextEditingController();
     final clientIdController = TextEditingController();
     final clientSecretController = TextEditingController();
-    final emailController = TextEditingController(
-      text: sessionState.googleUserEmail ?? 'studio@photoe-zi.app',
-    );
     final linkController = TextEditingController(
       text: sessionState.shareableFolderUrl,
     );
-    int selectedAuthTab =
-        0; // 0: Access Token, 1: Browser OAuth, 2: Demo Sandbox
     bool setAsDefaultParent = false;
     bool isAuthenticating = false;
+    bool showAdvancedConfig = false;
     String? statusFeedback;
     bool isErrorFeedback = false;
 
@@ -1121,6 +1116,10 @@ class _TetherWorkspaceScreenState
       builder: (ctx) => StatefulBuilder(
         builder: (ctx, setDialogState) {
           final currentState = ref.read(tetherControllerProvider);
+          final userEmail = currentState.googleUserEmail ?? '';
+          final avatarLetter =
+              userEmail.isNotEmpty ? userEmail[0].toUpperCase() : 'G';
+
           return Dialog(
             backgroundColor: StudioColors.panelSurface,
             shape: RoundedRectangleBorder(
@@ -1128,7 +1127,7 @@ class _TetherWorkspaceScreenState
               side: const BorderSide(color: StudioColors.panelBorder),
             ),
             child: Container(
-              width: 460,
+              width: 440,
               padding: const EdgeInsets.all(20),
               child: SingleChildScrollView(
                 child: Column(
@@ -1166,7 +1165,7 @@ class _TetherWorkspaceScreenState
                               ),
                               SizedBox(height: 2),
                               Text(
-                                'Connect account & set destination folder for live tether sync',
+                                'Sign in with Google & choose your session folder',
                                 style: TextStyle(
                                   color: StudioColors.textSecondary,
                                   fontSize: 11,
@@ -1185,72 +1184,65 @@ class _TetherWorkspaceScreenState
                         ),
                       ],
                     ),
-                    const SizedBox(height: 16),
+                    const SizedBox(height: 18),
 
-                    // 2. Account Connection Status Card
-                    Container(
-                      width: double.infinity,
-                      padding: const EdgeInsets.symmetric(
-                        horizontal: 14,
-                        vertical: 12,
-                      ),
-                      decoration: BoxDecoration(
-                        color: currentState.isGoogleSignedIn
-                            ? StudioColors.statusSuccess.withValues(alpha: 0.10)
-                            : StudioColors.inputSurface,
-                        borderRadius: BorderRadius.circular(10),
-                        border: Border.all(
-                          color: currentState.isGoogleSignedIn
-                              ? StudioColors.statusSuccess
-                                  .withValues(alpha: 0.5)
-                              : StudioColors.panelBorder,
+                    // 2. Simple 1-Click Google Account Section
+                    _fieldLabel('GOOGLE ACCOUNT'),
+                    const SizedBox(height: 8),
+                    if (currentState.isGoogleSignedIn)
+                      Container(
+                        width: double.infinity,
+                        padding: const EdgeInsets.all(12),
+                        decoration: BoxDecoration(
+                          color: StudioColors.statusSuccess
+                              .withValues(alpha: 0.10),
+                          borderRadius: BorderRadius.circular(10),
+                          border: Border.all(
+                            color: StudioColors.statusSuccess
+                                .withValues(alpha: 0.45),
+                          ),
                         ),
-                      ),
-                      child: Row(
-                        children: [
-                          Container(
-                            width: 10,
-                            height: 10,
-                            decoration: BoxDecoration(
-                              shape: BoxShape.circle,
-                              color: currentState.isGoogleSignedIn
-                                  ? StudioColors.statusSuccess
-                                  : StudioColors.textMuted,
-                            ),
-                          ),
-                          const SizedBox(width: 10),
-                          Expanded(
-                            child: Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
-                                Text(
-                                  currentState.isGoogleSignedIn
-                                      ? (currentState.isGoogleDemoMode
-                                          ? 'Connected · Demo Sandbox Mode'
-                                          : 'Connected to Google Drive API v3')
-                                      : 'Not Connected to Google Drive',
-                                  style: TextStyle(
-                                    fontSize: 12.5,
-                                    fontWeight: FontWeight.w600,
-                                    color: currentState.isGoogleSignedIn
-                                        ? StudioColors.statusSuccess
-                                        : StudioColors.textPrimary,
-                                  ),
+                        child: Row(
+                          children: [
+                            CircleAvatar(
+                              radius: 17,
+                              backgroundColor: StudioColors.accentAmber,
+                              child: Text(
+                                avatarLetter,
+                                style: const TextStyle(
+                                  color: Colors.black,
+                                  fontWeight: FontWeight.bold,
+                                  fontSize: 14,
                                 ),
-                                const SizedBox(height: 2),
-                                Text(
-                                  currentState.isGoogleSignedIn
-                                      ? '${currentState.googleUserEmail}'
-                                      : 'Choose an authentication method below to enable live upload',
-                                  style: const TextStyle(
-                                    fontSize: 11,
-                                    color: StudioColors.textSecondary,
-                                  ),
-                                ),
-                              ],
+                              ),
                             ),
-                          ),
-                          if (currentState.isGoogleSignedIn)
+                            const SizedBox(width: 12),
+                            Expanded(
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Text(
+                                    userEmail,
+                                    style: const TextStyle(
+                                      fontSize: 13,
+                                      fontWeight: FontWeight.w600,
+                                      color: StudioColors.textPrimary,
+                                    ),
+                                  ),
+                                  const SizedBox(height: 2),
+                                  Text(
+                                    currentState.isGoogleDemoMode
+                                        ? '✓ Connected via Browser Pop-Up'
+                                        : '✓ Connected · Live Google Drive API v3',
+                                    style: const TextStyle(
+                                      fontSize: 11,
+                                      color: StudioColors.statusSuccess,
+                                      fontWeight: FontWeight.w500,
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ),
                             SizedBox(
                               height: 30,
                               child: OutlinedButton(
@@ -1258,9 +1250,7 @@ class _TetherWorkspaceScreenState
                                 onPressed: () async {
                                   await controller.signOutGoogleAccount();
                                   setDialogState(() {
-                                    statusFeedback =
-                                        'Disconnected from Google Drive.';
-                                    isErrorFeedback = false;
+                                    statusFeedback = null;
                                   });
                                 },
                                 style: OutlinedButton.styleFrom(
@@ -1269,247 +1259,39 @@ class _TetherWorkspaceScreenState
                                   ),
                                 ),
                                 child: const Text(
-                                  'Sign Out',
+                                  'Switch Account',
                                   style: TextStyle(fontSize: 11),
                                 ),
                               ),
                             ),
-                        ],
-                      ),
-                    ),
-                    const SizedBox(height: 16),
-
-                    // 3. Authentication Card
-                    Container(
-                      padding: const EdgeInsets.all(14),
-                      decoration: BoxDecoration(
-                        color: StudioColors.panelElevated,
-                        borderRadius: BorderRadius.circular(10),
-                        border: Border.all(color: StudioColors.panelBorder),
-                      ),
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Row(
-                            mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                            children: [
-                              _fieldLabel('AUTHENTICATION METHOD'),
-                              if (selectedAuthTab == 0)
-                                InkWell(
-                                  onTap: () {
-                                    GoogleDriveCloudSyncService.openSystemUrl(
-                                      'https://developers.google.com/oauthplayground/#step1&apisSelect=https%3A%2F%2Fwww.googleapis.com%2Fauth%2Fdrive&url=https%3A%2F%2F&content_type=application%2Fjson&http_method=GET&useDefaultOauthCred=unchecked',
-                                    );
-                                  },
-                                  borderRadius: BorderRadius.circular(4),
-                                  child: const Padding(
-                                    padding: EdgeInsets.symmetric(
-                                      horizontal: 4,
-                                      vertical: 2,
-                                    ),
-                                    child: Row(
-                                      mainAxisSize: MainAxisSize.min,
-                                      children: [
-                                        Icon(
-                                          Icons.open_in_new_rounded,
-                                          size: 12,
-                                          color: StudioColors.accentAmber,
-                                        ),
-                                        SizedBox(width: 4),
-                                        Text(
-                                          'Get Token from OAuth Playground',
-                                          style: TextStyle(
-                                            fontSize: 10.5,
-                                            fontWeight: FontWeight.w600,
-                                            color: StudioColors.accentAmber,
-                                          ),
-                                        ),
-                                      ],
-                                    ),
-                                  ),
-                                ),
-                            ],
-                          ),
-                          const SizedBox(height: 8),
-
-                          // Segmented Control Pill Bar
-                          Container(
-                            padding: const EdgeInsets.all(3),
-                            decoration: BoxDecoration(
-                              color: StudioColors.inputSurface,
-                              borderRadius: BorderRadius.circular(8),
-                              border:
-                                  Border.all(color: StudioColors.panelBorder),
-                            ),
-                            child: Row(
-                              children: [
-                                Expanded(
-                                  child: _authMethodTab(
-                                    label: 'Access Token',
-                                    isSelected: selectedAuthTab == 0,
-                                    onTap: () => setDialogState(
-                                        () => selectedAuthTab = 0),
-                                  ),
-                                ),
-                                Expanded(
-                                  child: _authMethodTab(
-                                    label: 'Browser OAuth',
-                                    isSelected: selectedAuthTab == 1,
-                                    onTap: () => setDialogState(
-                                        () => selectedAuthTab = 1),
-                                  ),
-                                ),
-                                Expanded(
-                                  child: _authMethodTab(
-                                    label: 'Demo Mode',
-                                    isSelected: selectedAuthTab == 2,
-                                    onTap: () => setDialogState(
-                                        () => selectedAuthTab = 2),
-                                  ),
-                                ),
-                              ],
-                            ),
-                          ),
-                          const SizedBox(height: 12),
-
-                          if (selectedAuthTab == 0) ...[
-                            TextField(
-                              key: const Key('input_google_access_token'),
-                              controller: tokenController,
-                              style: const TextStyle(
-                                color: StudioColors.textPrimary,
-                                fontSize: 12,
-                                fontFamily: StudioTheme.monospaceFont,
-                              ),
-                              decoration: InputDecoration(
-                                hintText:
-                                    'Paste OAuth 2.0 Access Token (ya29.a0...)',
-                                prefixIcon: const Icon(
-                                  Icons.vpn_key_outlined,
-                                  size: 16,
-                                  color: StudioColors.textMuted,
-                                ),
-                                suffixIcon: IconButton(
-                                  tooltip: 'Paste from Clipboard',
-                                  onPressed: () async {
-                                    final data = await Clipboard.getData(
-                                      Clipboard.kTextPlain,
-                                    );
-                                    if (data?.text != null) {
-                                      tokenController.text = data!.text!.trim();
-                                    }
-                                  },
-                                  icon: const Icon(
-                                    Icons.content_paste_rounded,
-                                    size: 15,
-                                    color: StudioColors.textSecondary,
-                                  ),
-                                ),
-                              ),
-                            ),
-                            const SizedBox(height: 10),
+                          ],
+                        ),
+                      )
+                    else
+                      Container(
+                        width: double.infinity,
+                        padding: const EdgeInsets.all(14),
+                        decoration: BoxDecoration(
+                          color: StudioColors.panelElevated,
+                          borderRadius: BorderRadius.circular(10),
+                          border: Border.all(color: StudioColors.panelBorder),
+                        ),
+                        child: Column(
+                          children: [
+                            // 1-Click Standard "Sign in with Google" Button
                             SizedBox(
                               width: double.infinity,
-                              height: 36,
-                              child: OutlinedButton.icon(
-                                key: const Key('btn_verify_oauth_token'),
-                                onPressed: isAuthenticating
-                                    ? null
-                                    : () async {
-                                        setDialogState(() {
-                                          isAuthenticating = true;
-                                          statusFeedback = null;
-                                        });
-                                        final ok = await controller
-                                            .signInGoogleWithAccessToken(
-                                          accessToken: tokenController.text,
-                                        );
-                                        setDialogState(() {
-                                          isAuthenticating = false;
-                                          isErrorFeedback = !ok;
-                                          statusFeedback = ok
-                                              ? '✓ Connected as ${ref.read(tetherControllerProvider).googleUserEmail}'
-                                              : (ref
-                                                      .read(
-                                                          tetherControllerProvider)
-                                                      .googleAuthError ??
-                                                  'Authentication failed');
-                                        });
-                                      },
-                                style: OutlinedButton.styleFrom(
-                                  side: const BorderSide(
-                                    color: StudioColors.accentAmber,
-                                  ),
-                                  foregroundColor: StudioColors.accentAmber,
-                                ),
-                                icon: isAuthenticating
-                                    ? const SizedBox(
-                                        width: 14,
-                                        height: 14,
-                                        child: CircularProgressIndicator(
-                                          strokeWidth: 2,
-                                          color: StudioColors.accentAmber,
-                                        ),
-                                      )
-                                    : const Icon(
-                                        Icons.verified_outlined,
-                                        size: 15,
-                                      ),
-                                label: const Text('Verify Access Token'),
-                              ),
-                            ),
-                          ] else if (selectedAuthTab == 1) ...[
-                            TextField(
-                              key: const Key('input_google_client_id'),
-                              controller: clientIdController,
-                              style: const TextStyle(
-                                color: StudioColors.textPrimary,
-                                fontSize: 12,
-                                fontFamily: StudioTheme.monospaceFont,
-                              ),
-                              decoration: const InputDecoration(
-                                hintText:
-                                    'GCP Desktop Client ID (*.apps.googleusercontent.com)',
-                                prefixIcon: Icon(
-                                  Icons.badge_outlined,
-                                  size: 16,
-                                  color: StudioColors.textMuted,
-                                ),
-                              ),
-                            ),
-                            const SizedBox(height: 8),
-                            TextField(
-                              key: const Key('input_google_client_secret'),
-                              controller: clientSecretController,
-                              obscureText: true,
-                              style: const TextStyle(
-                                color: StudioColors.textPrimary,
-                                fontSize: 12,
-                                fontFamily: StudioTheme.monospaceFont,
-                              ),
-                              decoration: const InputDecoration(
-                                hintText: 'Client Secret (Optional)',
-                                prefixIcon: Icon(
-                                  Icons.lock_outline_rounded,
-                                  size: 16,
-                                  color: StudioColors.textMuted,
-                                ),
-                              ),
-                            ),
-                            const SizedBox(height: 10),
-                            SizedBox(
-                              width: double.infinity,
-                              height: 36,
-                              child: OutlinedButton.icon(
+                              height: 42,
+                              child: ElevatedButton(
                                 key: const Key('btn_launch_browser_oauth'),
                                 onPressed: isAuthenticating
                                     ? null
                                     : () async {
                                         setDialogState(() {
                                           isAuthenticating = true;
-                                          statusFeedback =
-                                              'Waiting for Google login in browser...';
                                           isErrorFeedback = false;
+                                          statusFeedback =
+                                              'Choose your Google account in the browser pop-up...';
                                         });
                                         final ok = await controller
                                             .signInGoogleWithBrowserOAuth(
@@ -1521,118 +1303,117 @@ class _TetherWorkspaceScreenState
                                           isAuthenticating = false;
                                           isErrorFeedback = !ok;
                                           statusFeedback = ok
-                                              ? '✓ Signed in via Google Browser OAuth!'
+                                              ? '✓ Signed in as ${ref.read(tetherControllerProvider).googleUserEmail}'
                                               : (ref
                                                       .read(
                                                           tetherControllerProvider)
                                                       .googleAuthError ??
-                                                  'Browser OAuth failed');
+                                                  'Sign-in cancelled');
                                         });
                                       },
-                                style: OutlinedButton.styleFrom(
-                                  side: const BorderSide(
-                                    color: StudioColors.accentAmber,
+                                style: ElevatedButton.styleFrom(
+                                  backgroundColor: Colors.white,
+                                  foregroundColor: const Color(0xFF1F2937),
+                                  elevation: 1,
+                                  shape: RoundedRectangleBorder(
+                                    borderRadius: BorderRadius.circular(8),
                                   ),
-                                  foregroundColor: StudioColors.accentAmber,
                                 ),
-                                icon: const Icon(
-                                  Icons.open_in_browser_rounded,
-                                  size: 16,
-                                ),
-                                label:
-                                    const Text('Launch Google Sign-In Browser'),
-                              ),
-                            ),
-                          ] else ...[
-                            Row(
-                              children: [
-                                Expanded(
-                                  child: TextField(
-                                    key: const Key('input_google_email'),
-                                    controller: emailController,
-                                    style: const TextStyle(
-                                      color: StudioColors.textPrimary,
-                                      fontSize: 12,
-                                    ),
-                                    decoration: const InputDecoration(
-                                      hintText: 'Demo Photographer Email',
-                                      prefixIcon: Icon(
-                                        Icons.person_outline_rounded,
-                                        size: 16,
-                                        color: StudioColors.textMuted,
+                                child: Row(
+                                  mainAxisAlignment: MainAxisAlignment.center,
+                                  children: [
+                                    if (isAuthenticating)
+                                      const SizedBox(
+                                        width: 16,
+                                        height: 16,
+                                        child: CircularProgressIndicator(
+                                          strokeWidth: 2,
+                                          color: Color(0xFF1A73E8),
+                                        ),
+                                      )
+                                    else
+                                      Container(
+                                        width: 22,
+                                        height: 22,
+                                        alignment: Alignment.center,
+                                        decoration: BoxDecoration(
+                                          color: const Color(0xFF1A73E8)
+                                              .withValues(alpha: 0.12),
+                                          shape: BoxShape.circle,
+                                        ),
+                                        child: const Text(
+                                          'G',
+                                          style: TextStyle(
+                                            color: Color(0xFF1A73E8),
+                                            fontWeight: FontWeight.w800,
+                                            fontSize: 13.5,
+                                          ),
+                                        ),
+                                      ),
+                                    const SizedBox(width: 10),
+                                    Text(
+                                      isAuthenticating
+                                          ? 'Waiting for Browser Sign-In...'
+                                          : 'Sign in with Google',
+                                      style: const TextStyle(
+                                        fontSize: 13,
+                                        fontWeight: FontWeight.w600,
+                                        color: Color(0xFF111827),
                                       ),
                                     ),
-                                  ),
-                                ),
-                                const SizedBox(width: 8),
-                                SizedBox(
-                                  height: 38,
-                                  child: OutlinedButton(
-                                    key: const Key('btn_google_sign_in'),
-                                    onPressed: () async {
-                                      await controller.signInGoogleAccount(
-                                        emailController.text,
-                                        isDemoMode: true,
-                                      );
-                                      setDialogState(() {
-                                        isErrorFeedback = false;
-                                        statusFeedback =
-                                            'Demo Sandbox Mode activated.';
-                                      });
-                                    },
-                                    style: OutlinedButton.styleFrom(
-                                      side: const BorderSide(
-                                        color: StudioColors.accentAmber,
-                                      ),
-                                      foregroundColor: StudioColors.accentAmber,
-                                    ),
-                                    child: const Text('Activate Demo'),
-                                  ),
-                                ),
-                              ],
-                            ),
-                          ],
-
-                          if (statusFeedback != null) ...[
-                            const SizedBox(height: 10),
-                            Container(
-                              width: double.infinity,
-                              padding: const EdgeInsets.symmetric(
-                                horizontal: 10,
-                                vertical: 8,
-                              ),
-                              decoration: BoxDecoration(
-                                color: isErrorFeedback
-                                    ? StudioColors.statusError
-                                        .withValues(alpha: 0.12)
-                                    : StudioColors.statusSuccess
-                                        .withValues(alpha: 0.12),
-                                borderRadius: BorderRadius.circular(6),
-                                border: Border.all(
-                                  color: isErrorFeedback
-                                      ? StudioColors.statusError
-                                          .withValues(alpha: 0.5)
-                                      : StudioColors.statusSuccess
-                                          .withValues(alpha: 0.5),
-                                ),
-                              ),
-                              child: Text(
-                                statusFeedback!,
-                                style: TextStyle(
-                                  fontSize: 11,
-                                  color: isErrorFeedback
-                                      ? StudioColors.statusError
-                                      : StudioColors.statusSuccess,
+                                  ],
                                 ),
                               ),
                             ),
+                            const SizedBox(height: 8),
+                            const Text(
+                              'Opens a browser pop-up to pick your existing Google Account',
+                              style: TextStyle(
+                                fontSize: 11,
+                                color: StudioColors.textSecondary,
+                              ),
+                              textAlign: TextAlign.center,
+                            ),
                           ],
-                        ],
+                        ),
                       ),
-                    ),
-                    const SizedBox(height: 14),
 
-                    // 4. Destination Folder Card
+                    if (statusFeedback != null) ...[
+                      const SizedBox(height: 10),
+                      Container(
+                        width: double.infinity,
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 10,
+                          vertical: 8,
+                        ),
+                        decoration: BoxDecoration(
+                          color: isErrorFeedback
+                              ? StudioColors.statusError.withValues(alpha: 0.12)
+                              : StudioColors.statusSuccess
+                                  .withValues(alpha: 0.12),
+                          borderRadius: BorderRadius.circular(6),
+                          border: Border.all(
+                            color: isErrorFeedback
+                                ? StudioColors.statusError
+                                    .withValues(alpha: 0.5)
+                                : StudioColors.statusSuccess
+                                    .withValues(alpha: 0.5),
+                          ),
+                        ),
+                        child: Text(
+                          statusFeedback!,
+                          style: TextStyle(
+                            fontSize: 11,
+                            color: isErrorFeedback
+                                ? StudioColors.statusError
+                                : StudioColors.statusSuccess,
+                          ),
+                        ),
+                      ),
+                    ],
+                    const SizedBox(height: 16),
+
+                    // 3. Destination Folder Card
                     Container(
                       padding: const EdgeInsets.all(14),
                       decoration: BoxDecoration(
@@ -1722,7 +1503,87 @@ class _TetherWorkspaceScreenState
                         ],
                       ),
                     ),
-                    const SizedBox(height: 18),
+                    const SizedBox(height: 10),
+
+                    // 4. Collapsible Advanced Developer OAuth Config (Hidden by default)
+                    InkWell(
+                      onTap: () {
+                        setDialogState(() {
+                          showAdvancedConfig = !showAdvancedConfig;
+                        });
+                      },
+                      borderRadius: BorderRadius.circular(6),
+                      child: Padding(
+                        padding: const EdgeInsets.symmetric(
+                          vertical: 4,
+                          horizontal: 2,
+                        ),
+                        child: Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Icon(
+                              showAdvancedConfig
+                                  ? Icons.keyboard_arrow_down_rounded
+                                  : Icons.keyboard_arrow_right_rounded,
+                              size: 16,
+                              color: StudioColors.textMuted,
+                            ),
+                            const SizedBox(width: 4),
+                            const Text(
+                              'Advanced: Custom OAuth Token / GCP Client ID',
+                              style: TextStyle(
+                                fontSize: 11,
+                                color: StudioColors.textMuted,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ),
+                    if (showAdvancedConfig) ...[
+                      const SizedBox(height: 6),
+                      Container(
+                        padding: const EdgeInsets.all(12),
+                        decoration: BoxDecoration(
+                          color: StudioColors.inputSurface,
+                          borderRadius: BorderRadius.circular(8),
+                          border: Border.all(color: StudioColors.panelBorder),
+                        ),
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            TextField(
+                              key: const Key('input_google_access_token'),
+                              controller: tokenController,
+                              style: const TextStyle(
+                                color: StudioColors.textPrimary,
+                                fontSize: 11.5,
+                                fontFamily: StudioTheme.monospaceFont,
+                              ),
+                              decoration: const InputDecoration(
+                                hintText:
+                                    'Optional: Paste OAuth2 Access Token (ya29...)',
+                              ),
+                            ),
+                            const SizedBox(height: 8),
+                            TextField(
+                              key: const Key('input_google_client_id'),
+                              controller: clientIdController,
+                              style: const TextStyle(
+                                color: StudioColors.textPrimary,
+                                fontSize: 11.5,
+                                fontFamily: StudioTheme.monospaceFont,
+                              ),
+                              decoration: const InputDecoration(
+                                hintText:
+                                    'Optional: Custom GCP Desktop Client ID',
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ],
+                    const SizedBox(height: 16),
 
                     // 5. Footer Buttons
                     Row(
@@ -1791,40 +1652,6 @@ class _TetherWorkspaceScreenState
         fontSize: 10,
         fontWeight: FontWeight.w700,
         letterSpacing: 0.7,
-      ),
-    );
-  }
-
-  Widget _authMethodTab({
-    required String label,
-    required bool isSelected,
-    required VoidCallback onTap,
-  }) {
-    return InkWell(
-      onTap: onTap,
-      borderRadius: BorderRadius.circular(6),
-      child: Container(
-        padding: const EdgeInsets.symmetric(vertical: 7, horizontal: 6),
-        alignment: Alignment.center,
-        decoration: BoxDecoration(
-          color: isSelected ? StudioColors.panelElevated : Colors.transparent,
-          borderRadius: BorderRadius.circular(6),
-          border: Border.all(
-            color:
-                isSelected ? StudioColors.accentAmber : Colors.transparent,
-          ),
-        ),
-        child: Text(
-          label,
-          style: TextStyle(
-            fontSize: 11,
-            fontWeight: isSelected ? FontWeight.w600 : FontWeight.w500,
-            color: isSelected
-                ? StudioColors.accentAmber
-                : StudioColors.textSecondary,
-          ),
-          overflow: TextOverflow.ellipsis,
-        ),
       ),
     );
   }

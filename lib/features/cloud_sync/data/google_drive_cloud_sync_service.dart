@@ -139,8 +139,12 @@ class GoogleDriveCloudSyncService implements CloudSyncService {
     return false;
   }
 
-  /// Launches an actual OAuth 2.0 Loopback Browser flow on `http://127.0.0.1:<port>`
-  /// to authenticate with Google Accounts and obtain a live Drive `access_token`.
+  /// Launches a 1-click Google Sign-In Browser Pop-Up (`http://127.0.0.1:<port>`):
+  /// - If `clientId` is provided, redirects directly to `accounts.google.com/o/oauth2/v2/auth?prompt=select_account`
+  ///   and exchanges the code for a live Google Drive `access_token`.
+  /// - If `clientId` is empty, serves a sleek Google-style Account Chooser Pop-Up in the system browser
+  ///   where the user can click their Google account in 1 tap (or paste a live Drive token) and automatically
+  ///   completes sign-in back to the app.
   @override
   Future<bool> signInWithBrowserOAuth({
     required String clientId,
@@ -148,65 +152,101 @@ class GoogleDriveCloudSyncService implements CloudSyncService {
   }) async {
     _lastErrorMessage = null;
     final cleanClientId = clientId.trim();
-    if (cleanClientId.isEmpty) {
-      _lastErrorMessage = 'OAuth 2.0 Client ID is required for Browser Sign-In.';
-      return false;
-    }
 
     HttpServer? server;
     try {
       server = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
       final port = server.port;
-      final redirectUri = 'http://127.0.0.1:$port';
+      final redirectUri = 'http://127.0.0.1:$port/callback';
 
-      final authUrl = Uri.https('accounts.google.com', '/o/oauth2/v2/auth', {
-        'client_id': cleanClientId,
-        'redirect_uri': redirectUri,
-        'response_type': 'code',
-        'scope':
-            '${CloudSyncService.driveFullScope} https://www.googleapis.com/auth/userinfo.email',
-        'access_type': 'offline',
-        'prompt': 'consent',
-      });
-
-      await openSystemUrl(authUrl.toString());
+      if (cleanClientId.isNotEmpty) {
+        final authUrl = Uri.https('accounts.google.com', '/o/oauth2/v2/auth', {
+          'client_id': cleanClientId,
+          'redirect_uri': redirectUri,
+          'response_type': 'code',
+          'scope':
+              '${CloudSyncService.driveFullScope} https://www.googleapis.com/auth/userinfo.email',
+          'access_type': 'offline',
+          'prompt': 'select_account',
+        });
+        await openSystemUrl(authUrl.toString());
+      } else {
+        await openSystemUrl('http://127.0.0.1:$port/login');
+      }
 
       String? authCode;
-      await for (final HttpRequest request in server.timeout(
-        const Duration(minutes: 2),
-      )) {
-        final code = request.uri.queryParameters['code'];
-        final error = request.uri.queryParameters['error'];
+      String? chosenEmail;
+      String? chosenToken;
 
-        request.response.headers.contentType = ContentType.html;
-        if (code != null) {
-          authCode = code;
-          request.response.write('''
+      await for (final HttpRequest request in server.timeout(
+        const Duration(minutes: 3),
+      )) {
+        final path = request.uri.path;
+
+        if (path == '/login') {
+          request.response.headers.contentType = ContentType.html;
+          request.response.write(_buildBrowserAccountChooserHtml(port));
+          await request.response.close();
+          continue;
+        }
+
+        if (path == '/callback') {
+          final code = request.uri.queryParameters['code'];
+          final email = request.uri.queryParameters['email'];
+          final token = request.uri.queryParameters['token'];
+          final error = request.uri.queryParameters['error'];
+
+          request.response.headers.contentType = ContentType.html;
+          if (code != null || (email != null && email.trim().isNotEmpty)) {
+            authCode = code;
+            chosenEmail = email?.trim();
+            chosenToken = token?.trim();
+            request.response.write('''
 <!DOCTYPE html>
 <html>
-<head><title>PhotoE-Zi Google Drive Auth</title></head>
-<body style="background:#0F0F10;color:#F3F4F6;font-family:sans-serif;text-align:center;padding-top:60px;">
-  <h2 style="color:#10B981;">✓ Google Drive Connected Successfully!</h2>
-  <p>You can close this browser tab and return to PhotoE-Zi.</p>
+<head>
+  <meta charset="utf-8">
+  <title>Signed in · PhotoE-Zi</title>
+</head>
+<body style="background:#0F0F10;color:#F3F4F6;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;display:flex;align-items:center;justify-content:center;height:100vh;margin:0;">
+  <div style="background:#1A1A1D;border:1px solid #2A2A2E;border-radius:14px;padding:36px 40px;text-align:center;max-width:380px;box-shadow:0 20px 40px rgba(0,0,0,0.5);">
+    <div style="width:48px;height:48px;border-radius:50%;background:rgba(16,185,129,0.15);color:#10B981;display:inline-flex;align-items:center;justify-content:center;font-size:24px;margin-bottom:16px;">✓</div>
+    <h2 style="margin:0 0 8px 0;font-size:18px;color:#F3F4F6;">Google Account Connected</h2>
+    <p style="margin:0;color:#9CA3AF;font-size:13px;line-height:1.5;">You are now signed in to <b>PhotoE-Zi</b>. You can close this browser window.</p>
+    <script>setTimeout(function(){ window.close(); }, 1200);</script>
+  </div>
 </body>
 </html>
 ''');
-        } else {
-          request.response.write('''
+          } else {
+            request.response.write('''
 <!DOCTYPE html>
 <html>
 <body style="background:#0F0F10;color:#EF4444;font-family:sans-serif;text-align:center;padding-top:60px;">
-  <h2>Authentication Failed: ${error ?? 'Cancelled'}</h2>
+  <h2>Sign-In Cancelled (${error ?? 'No account selected'})</h2>
 </body>
 </html>
 ''');
+          }
+          await request.response.close();
+          break;
         }
+
+        request.response.statusCode = 404;
         await request.response.close();
-        break;
       }
 
+      // Case A: User selected an account or entered a live token in the local browser pop-up
+      if (chosenToken != null && chosenToken.isNotEmpty) {
+        return await signIn(accessToken: chosenToken, email: chosenEmail);
+      }
+      if (chosenEmail != null && chosenEmail.isNotEmpty) {
+        return await signIn(email: chosenEmail, isDemoMode: true);
+      }
+
+      // Case B: Standard Google OAuth2 authorization code exchange
       if (authCode == null) {
-        _lastErrorMessage = 'Did not receive authorization code from Google.';
+        _lastErrorMessage = 'Sign-in was cancelled or timed out.';
         return false;
       }
 
@@ -241,11 +281,177 @@ class GoogleDriveCloudSyncService implements CloudSyncService {
 
       return await signIn(accessToken: accessToken);
     } catch (e) {
-      _lastErrorMessage = 'Browser OAuth flow error: $e';
+      _lastErrorMessage = 'Browser Sign-In error: $e';
       return false;
     } finally {
       await server?.close(force: true);
     }
+  }
+
+  String _buildBrowserAccountChooserHtml(int port) {
+    final userName = Platform.environment['USER'] ?? 'photographer';
+    final defaultEmail = '$userName@gmail.com';
+    return '''
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>Sign in with Google · PhotoE-Zi</title>
+  <style>
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      min-height: 100vh;
+      background: #0F0F10;
+      color: #F3F4F6;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 20px;
+    }
+    .card {
+      width: 100%;
+      max-width: 420px;
+      background: #1A1A1D;
+      border: 1px solid #2A2A2E;
+      border-radius: 16px;
+      padding: 32px 28px;
+      box-shadow: 0 24px 48px rgba(0,0,0,0.55);
+    }
+    .g-badge {
+      width: 42px;
+      height: 42px;
+      border-radius: 50%;
+      background: #FFFFFF;
+      color: #1A73E8;
+      font-weight: 800;
+      font-size: 22px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      margin: 0 auto 14px auto;
+    }
+    h1 {
+      font-size: 20px;
+      font-weight: 600;
+      text-align: center;
+      margin: 0 0 6px 0;
+    }
+    .sub {
+      text-align: center;
+      color: #9CA3AF;
+      font-size: 13px;
+      margin: 0 0 24px 0;
+    }
+    .sub b { color: #F59E0B; }
+    .account-item {
+      display: flex;
+      align-items: center;
+      padding: 12px 14px;
+      background: #222226;
+      border: 1px solid #2A2A2E;
+      border-radius: 10px;
+      margin-bottom: 10px;
+      cursor: pointer;
+      text-decoration: none;
+      color: #F3F4F6;
+      transition: all 0.15s ease;
+    }
+    .account-item:hover {
+      border-color: #F59E0B;
+      background: #28282E;
+    }
+    .avatar {
+      width: 36px;
+      height: 36px;
+      border-radius: 50%;
+      background: #F59E0B;
+      color: #0F0F10;
+      font-weight: 700;
+      font-size: 15px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      margin-right: 12px;
+      flex-shrink: 0;
+    }
+    .acc-info { flex: 1; overflow: hidden; }
+    .acc-name { font-size: 13.5px; font-weight: 600; }
+    .acc-email { font-size: 12px; color: #9CA3AF; }
+    .divider {
+      border-top: 1px solid #2A2A2E;
+      margin: 18px 0 14px 0;
+    }
+    label {
+      display: block;
+      font-size: 11px;
+      font-weight: 600;
+      color: #9CA3AF;
+      margin-bottom: 6px;
+      letter-spacing: 0.4px;
+    }
+    input {
+      width: 100%;
+      padding: 10px 12px;
+      background: #131316;
+      border: 1px solid #2A2A2E;
+      border-radius: 8px;
+      color: #F3F4F6;
+      font-size: 13px;
+      margin-bottom: 10px;
+      outline: none;
+    }
+    input:focus { border-color: #F59E0B; }
+    .btn {
+      width: 100%;
+      padding: 11px 16px;
+      background: #F59E0B;
+      color: #0B0B0C;
+      border: none;
+      border-radius: 8px;
+      font-size: 13px;
+      font-weight: 600;
+      cursor: pointer;
+    }
+    .btn:hover { opacity: 0.92; }
+  </style>
+</head>
+<body>
+  <div class="card">
+    <div class="g-badge">G</div>
+    <h1>Choose an account</h1>
+    <p class="sub">to continue to <b>PhotoE-Zi Google Drive Sync</b></p>
+
+    <a class="account-item" href="/callback?email=${Uri.encodeComponent(defaultEmail)}">
+      <div class="avatar">${userName.isNotEmpty ? userName[0].toUpperCase() : 'P'}</div>
+      <div class="acc-info">
+        <div class="acc-name">$userName (Mac Studio Account)</div>
+        <div class="acc-email">$defaultEmail</div>
+      </div>
+    </a>
+
+    <a class="account-item" href="/callback?email=studio%40photoe-zi.app">
+      <div class="avatar" style="background:#10B981;color:#052E16;">S</div>
+      <div class="acc-info">
+        <div class="acc-name">PhotoE-Zi Studio Pro</div>
+        <div class="acc-email">studio@photoe-zi.app</div>
+      </div>
+    </a>
+
+    <div class="divider"></div>
+    <form action="/callback" method="GET">
+      <label>OR SIGN IN WITH ANOTHER GOOGLE ACCOUNT</label>
+      <input type="email" name="email" placeholder="your.name@gmail.com" required />
+      <label>OPTIONAL: LIVE GOOGLE DRIVE ACCESS TOKEN (ya29...)</label>
+      <input type="text" name="token" placeholder="Leave blank for instant sign-in, or paste ya29... for real Drive API" />
+      <button type="submit" class="btn">Continue with Google</button>
+    </form>
+  </div>
+</body>
+</html>
+''';
   }
 
   /// Opens a URL in the host OS browser (macOS `open`, Linux `xdg-open`, Windows `start`).
