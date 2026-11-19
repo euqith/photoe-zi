@@ -3,7 +3,6 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:photoe_zi/core/constants/studio_theme.dart';
 import 'package:photoe_zi/core/database/app_database.dart';
 import 'package:photoe_zi/core/utils/exif_and_histogram_utils.dart';
-import 'package:photoe_zi/features/film_sim/domain/lut_preset.dart';
 import 'package:photoe_zi/features/tether_view/presentation/tether_workspace_controller.dart';
 import 'package:photoe_zi/features/tether_view/presentation/widgets/exif_metadata_panel.dart';
 import 'package:photoe_zi/features/tether_view/presentation/widgets/filmstrip_bar.dart';
@@ -184,6 +183,8 @@ class _TetherWorkspaceScreenState
                       ? sessionState.inMemoryPreviews[activePhoto.id]
                       : null,
                   activeLutId: sessionState.activeLutId,
+                  activeLutData: sessionState.activeLutData,
+                  activeLutTexture: sessionState.activeLutTexture,
                   lutIntensity: sessionState.lutIntensity,
                   isBeforeAfterPressed: sessionState.isBeforeAfterPressed,
                   lockLatest: sessionState.lockLatest,
@@ -235,19 +236,30 @@ class _TetherWorkspaceScreenState
             activePhoto: activePhoto,
             histogramData: histogramData,
             isHistogramLoading: isHistogramLoading,
+            presets: sessionState.availablePresets,
             activeLutId: sessionState.activeLutId,
             lutIntensity: sessionState.lutIntensity,
             syncStatus: activeSyncStatus,
             onSelectLut: controller.setActiveLut,
             onIntensityChanged: controller.setLutIntensity,
-            onImportCube: () {
-              ScaffoldMessenger.of(context).showSnackBar(
-                const SnackBar(
-                  content: Text(
-                    'Custom .cube LUT import ready (Sprint 2 GPU Engine)',
-                  ),
-                ),
-              );
+            onImportCube: () async {
+              try {
+                final imported =
+                    await controller.pickAndImportCustomCubeFile();
+                if (imported != null && mounted) {
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    SnackBar(
+                      content: Text('Imported & activated LUT: ${imported.name}'),
+                    ),
+                  );
+                }
+              } catch (e) {
+                if (mounted) {
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    SnackBar(content: Text('Failed to import .cube: $e')),
+                  );
+                }
+              }
             },
             onManualUpload: () {
               ScaffoldMessenger.of(context).showSnackBar(
@@ -289,6 +301,8 @@ class _TetherWorkspaceScreenState
                     ? sessionState.inMemoryPreviews[activePhoto.id]
                     : null,
                 activeLutId: sessionState.activeLutId,
+                activeLutData: sessionState.activeLutData,
+                activeLutTexture: sessionState.activeLutTexture,
                 lutIntensity: sessionState.lutIntensity,
                 isBeforeAfterPressed: sessionState.isBeforeAfterPressed,
                 lockLatest: sessionState.lockLatest,
@@ -398,7 +412,7 @@ class _TetherWorkspaceScreenState
                     ),
                     const SizedBox(height: 12),
                     if (_selectedPortraitTab == 0) ...[
-                      ...LutPreset.builtInPresets.map((preset) {
+                      ...sessionState.availablePresets.map((preset) {
                         final isSelected =
                             preset.id == sessionState.activeLutId;
                         return Padding(

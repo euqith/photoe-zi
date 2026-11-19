@@ -1,15 +1,20 @@
 import 'dart:io';
 import 'dart:typed_data';
+import 'dart:ui' as ui;
 
 import 'package:flutter/material.dart';
 import 'package:photoe_zi/core/constants/studio_theme.dart';
 import 'package:photoe_zi/core/database/app_database.dart';
 import 'package:photoe_zi/core/utils/exif_and_histogram_utils.dart';
+import 'package:photoe_zi/features/film_sim/data/gpu_lut_renderer.dart';
+import 'package:photoe_zi/features/film_sim/domain/cube_lut_parser.dart';
 
 class MainPhotoCanvas extends StatefulWidget {
   final Photo? activePhoto;
   final Uint8List? inMemoryPreview;
   final String activeLutId;
+  final CubeLutData? activeLutData;
+  final ui.Image? activeLutTexture;
   final double lutIntensity;
   final bool isBeforeAfterPressed;
   final bool lockLatest;
@@ -26,6 +31,8 @@ class MainPhotoCanvas extends StatefulWidget {
     required this.activePhoto,
     required this.inMemoryPreview,
     required this.activeLutId,
+    this.activeLutData,
+    this.activeLutTexture,
     required this.lutIntensity,
     required this.isBeforeAfterPressed,
     required this.lockLatest,
@@ -74,85 +81,30 @@ class _MainPhotoCanvasState extends State<MainPhotoCanvas> {
     }
   }
 
-  ColorFilter? _buildPreviewLutFilter() {
-    if (widget.isBeforeAfterPressed ||
-        widget.activeLutId == 'none' ||
-        widget.lutIntensity <= 0.01) {
-      return null;
+  Uint8List? _resolveDisplayBytes(Photo photo) {
+    final fullPath = photo.fullResPath;
+    if (fullPath != null) {
+      final f = File(fullPath);
+      if (f.existsSync()) {
+        return f.readAsBytesSync();
+      }
     }
-
-    final t = widget.lutIntensity;
-    switch (widget.activeLutId) {
-      case 'classic_chrome':
-        return ColorFilter.matrix([
-          1 - 0.1 * t, 0.08 * t, 0.02 * t, 0, 0,
-          0.04 * t, 1 - 0.04 * t, 0.02 * t, 0, 0,
-          0.02 * t, 0.06 * t, 1 - 0.14 * t, 0, 0,
-          0, 0, 0, 1, 0,
-        ]);
-      case 'classic_neg':
-        return ColorFilter.matrix([
-          1 + 0.12 * t, -0.04 * t, -0.04 * t, 0, 0,
-          -0.02 * t, 1 - 0.02 * t, 0.04 * t, 0, 0,
-          0.05 * t, -0.05 * t, 1 + 0.05 * t, 0, 0,
-          0, 0, 0, 1, 0,
-        ]);
-      case 'kodachrome':
-        return ColorFilter.matrix([
-          1 + 0.15 * t, 0.04 * t, -0.05 * t, 0, 0,
-          0.02 * t, 1 + 0.03 * t, -0.02 * t, 0, 0,
-          -0.04 * t, 0.02 * t, 1 - 0.08 * t, 0, 0,
-          0, 0, 0, 1, 0,
-        ]);
-      case 'japanese_airy':
-        return ColorFilter.matrix([
-          1 + 0.06 * t, 0.04 * t, 0.04 * t, 0, 14 * t,
-          0.03 * t, 1 + 0.08 * t, 0.05 * t, 0, 16 * t,
-          0.04 * t, 0.06 * t, 1 + 0.10 * t, 0, 18 * t,
-          0, 0, 0, 1, 0,
-        ]);
-      case 'bw_acros':
-        final r = 0.299 * t;
-        final g = 0.587 * t;
-        final b = 0.114 * t;
-        return ColorFilter.matrix([
-          (1 - t) + r, g, b, 0, 0,
-          r, (1 - t) + g, b, 0, 0,
-          r, g, (1 - t) + b, 0, 0,
-          0, 0, 0, 1, 0,
-        ]);
-      default:
-        return null;
+    if (widget.inMemoryPreview != null) {
+      return widget.inMemoryPreview;
     }
+    if (photo.previewPath != null) {
+      final f = File(photo.previewPath!);
+      if (f.existsSync()) {
+        return f.readAsBytesSync();
+      }
+    }
+    return null;
   }
 
   Widget _buildImageContent(Photo photo) {
-    Widget rawImage;
-    final fullPath = photo.fullResPath;
-    if (fullPath != null && File(fullPath).existsSync()) {
-      rawImage = Image.file(
-        File(fullPath),
-        key: ValueKey('full_${photo.id}'),
-        fit: BoxFit.contain,
-        gaplessPlayback: true,
-      );
-    } else if (widget.inMemoryPreview != null) {
-      rawImage = Image.memory(
-        widget.inMemoryPreview!,
-        key: ValueKey('mem_${photo.id}'),
-        fit: BoxFit.contain,
-        gaplessPlayback: true,
-      );
-    } else if (photo.previewPath != null &&
-        File(photo.previewPath!).existsSync()) {
-      rawImage = Image.file(
-        File(photo.previewPath!),
-        key: ValueKey('prev_${photo.id}'),
-        fit: BoxFit.contain,
-        gaplessPlayback: true,
-      );
-    } else {
-      rawImage = const Center(
+    final bytes = _resolveDisplayBytes(photo);
+    if (bytes == null) {
+      return const Center(
         child: Icon(
           Icons.image_outlined,
           size: 64,
@@ -161,14 +113,14 @@ class _MainPhotoCanvasState extends State<MainPhotoCanvas> {
       );
     }
 
-    final filter = _buildPreviewLutFilter();
-    if (filter != null) {
-      return ColorFiltered(
-        colorFilter: filter,
-        child: rawImage,
-      );
-    }
-    return rawImage;
+    return GpuLutImageRenderer(
+      key: ValueKey('gpu_lut_${photo.id}_${photo.fullResPath != null}'),
+      imageBytes: bytes,
+      lutData: widget.activeLutData,
+      lutTexture: widget.activeLutTexture,
+      intensity: widget.lutIntensity,
+      bypassLut: widget.isBeforeAfterPressed || widget.activeLutId == 'none',
+    );
   }
 
   @override
@@ -219,7 +171,7 @@ class _MainPhotoCanvasState extends State<MainPhotoCanvas> {
               ),
               icon: const Icon(Icons.play_arrow_rounded, size: 18),
               label: const Text(
-                'Start Mock Tether (3s Interval)',
+                'Start Mock Tether (3 Sample Shots)',
                 style: TextStyle(fontWeight: FontWeight.w600, fontSize: 12),
               ),
             ),
@@ -458,4 +410,3 @@ class _MainPhotoCanvasState extends State<MainPhotoCanvas> {
     );
   }
 }
-

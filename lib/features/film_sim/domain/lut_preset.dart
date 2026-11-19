@@ -3,6 +3,7 @@ class LutPreset {
   final String name;
   final String category;
   final String? assetPath;
+  final String? customFilePath;
   final bool isCustom;
 
   const LutPreset({
@@ -10,6 +11,7 @@ class LutPreset {
     required this.name,
     required this.category,
     this.assetPath,
+    this.customFilePath,
     this.isCustom = false,
   });
 
@@ -51,4 +53,3 @@ class LutPreset {
     ),
   ];
 }
-

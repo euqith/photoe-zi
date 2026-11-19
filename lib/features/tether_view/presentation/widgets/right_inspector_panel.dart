@@ -10,6 +10,7 @@ class RightInspectorPanel extends StatelessWidget {
   final Photo? activePhoto;
   final RgbHistogramData histogramData;
   final bool isHistogramLoading;
+  final List<LutPreset> presets;
   final String activeLutId;
   final double lutIntensity;
   final String syncStatus;
@@ -23,6 +24,7 @@ class RightInspectorPanel extends StatelessWidget {
     required this.activePhoto,
     required this.histogramData,
     required this.isHistogramLoading,
+    this.presets = LutPreset.builtInPresets,
     required this.activeLutId,
     required this.lutIntensity,
     required this.syncStatus,
@@ -54,7 +56,7 @@ class RightInspectorPanel extends StatelessWidget {
           const SizedBox(height: 16),
           _sectionHeader('FILM SIMULATION'),
           const SizedBox(height: 8),
-          ...LutPreset.builtInPresets.map((preset) {
+          ...presets.map((preset) {
             final isSelected = preset.id == activeLutId;
             return Padding(
               padding: const EdgeInsets.only(bottom: 5),

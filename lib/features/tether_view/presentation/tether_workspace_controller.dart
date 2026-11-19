@@ -1,14 +1,20 @@
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
+import 'dart:ui' as ui;
 
 import 'package:drift/drift.dart';
+import 'package:file_picker/file_picker.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:path/path.dart' as p;
 import 'package:photoe_zi/core/database/app_database.dart';
 import 'package:photoe_zi/core/utils/exif_and_histogram_utils.dart';
 import 'package:photoe_zi/features/camera/data/mock_camera_driver.dart';
 import 'package:photoe_zi/features/camera/domain/base_camera_driver.dart';
+import 'package:photoe_zi/features/film_sim/data/lut_baker_service.dart';
+import 'package:photoe_zi/features/film_sim/data/lut_preset_manager.dart';
+import 'package:photoe_zi/features/film_sim/domain/cube_lut_parser.dart';
+import 'package:photoe_zi/features/film_sim/domain/lut_preset.dart';
 
 enum FilmstripFilter { all, favorites }
 
@@ -26,7 +32,11 @@ class TetherSessionState {
   final FilmstripFilter filter;
   final String activeLutId;
   final double lutIntensity;
+  final List<LutPreset> availablePresets;
+  final CubeLutData? activeLutData;
+  final ui.Image? activeLutTexture;
   final Map<String, Uint8List> inMemoryPreviews;
+  final Map<String, String> bakedFilePaths;
 
   const TetherSessionState({
     this.activeSessionId = 'session_studio_a',
@@ -42,7 +52,11 @@ class TetherSessionState {
     this.filter = FilmstripFilter.all,
     this.activeLutId = 'classic_chrome',
     this.lutIntensity = 0.85,
+    this.availablePresets = LutPreset.builtInPresets,
+    this.activeLutData,
+    this.activeLutTexture,
     this.inMemoryPreviews = const {},
+    this.bakedFilePaths = const {},
   });
 
   TetherSessionState copyWith({
@@ -60,7 +74,12 @@ class TetherSessionState {
     FilmstripFilter? filter,
     String? activeLutId,
     double? lutIntensity,
+    List<LutPreset>? availablePresets,
+    CubeLutData? activeLutData,
+    bool clearActiveLut = false,
+    ui.Image? activeLutTexture,
     Map<String, Uint8List>? inMemoryPreviews,
+    Map<String, String>? bakedFilePaths,
   }) {
     return TetherSessionState(
       activeSessionId: activeSessionId ?? this.activeSessionId,
@@ -79,7 +98,13 @@ class TetherSessionState {
       filter: filter ?? this.filter,
       activeLutId: activeLutId ?? this.activeLutId,
       lutIntensity: lutIntensity ?? this.lutIntensity,
+      availablePresets: availablePresets ?? this.availablePresets,
+      activeLutData:
+          clearActiveLut ? null : (activeLutData ?? this.activeLutData),
+      activeLutTexture:
+          clearActiveLut ? null : (activeLutTexture ?? this.activeLutTexture),
       inMemoryPreviews: inMemoryPreviews ?? this.inMemoryPreviews,
+      bakedFilePaths: bakedFilePaths ?? this.bakedFilePaths,
     );
   }
 }
@@ -96,15 +121,27 @@ final cameraDriverProvider = Provider<BaseCameraDriver>((ref) {
   return driver;
 });
 
+final lutPresetManagerProvider = Provider<LutPresetManager>((ref) {
+  return LutPresetManager();
+});
+
+final lutBakerServiceProvider = Provider<LutBakerService>((ref) {
+  return const LutBakerService();
+});
+
 class TetherWorkspaceController extends StateNotifier<TetherSessionState> {
   final AppDatabase db;
   final BaseCameraDriver cameraDriver;
+  final LutPresetManager lutManager;
+  final LutBakerService lutBaker;
   StreamSubscription<CameraConnectionState>? _connSub;
   StreamSubscription<IncomingPhoto>? _photoSub;
 
   TetherWorkspaceController({
     required this.db,
     required this.cameraDriver,
+    required this.lutManager,
+    required this.lutBaker,
   }) : super(TetherSessionState(cameraDriverName: cameraDriver.driverName)) {
     _initializeSessionAndStreams();
   }
@@ -122,6 +159,12 @@ class TetherWorkspaceController extends StateNotifier<TetherSessionState> {
       );
     }
 
+    final presets = await lutManager.loadSavedCustomPresets();
+    if (mounted) {
+      state = state.copyWith(availablePresets: presets);
+    }
+    await _loadActiveLutResources(state.activeLutId);
+
     _connSub = cameraDriver.connectionStateStream.listen((connState) {
       if (mounted) {
         state = state.copyWith(cameraState: connState);
@@ -129,6 +172,26 @@ class TetherWorkspaceController extends StateNotifier<TetherSessionState> {
     });
 
     _photoSub = cameraDriver.onNewPhotoStream.listen(_handleIncomingPhoto);
+  }
+
+  Future<void> _loadActiveLutResources(String lutId) async {
+    if (lutId == 'none' || lutId.isEmpty) {
+      if (mounted) {
+        state = state.copyWith(clearActiveLut: true);
+      }
+      return;
+    }
+
+    try {
+      final lutData = await lutManager.getLutData(lutId);
+      final lutTexture = await lutManager.getGpuLutTexture(lutId);
+      if (mounted && state.activeLutId == lutId) {
+        state = state.copyWith(
+          activeLutData: lutData,
+          activeLutTexture: lutTexture,
+        );
+      }
+    } catch (_) {}
   }
 
   Future<void> _handleIncomingPhoto(IncomingPhoto incoming) async {
@@ -166,7 +229,6 @@ class TetherWorkspaceController extends StateNotifier<TetherSessionState> {
         ),
       );
 
-      // Enqueue initial upload status entry so Drive sync badge is tracked
       await db.enqueueUpload(
         UploadQueueCompanion.insert(
           id: 'uq_${incoming.id}',
@@ -178,6 +240,10 @@ class TetherWorkspaceController extends StateNotifier<TetherSessionState> {
       );
     } else if (incoming.fullResLocalPath != null) {
       await db.updatePhotoFullResPath(incoming.id, incoming.fullResLocalPath!);
+      // Auto-bake full-resolution JPEG with active LUT in background isolate (Issue #2.3)
+      unawaited(
+        _autoBakeFullResInBackground(incoming.id, incoming.fullResLocalPath!),
+      );
     }
 
     if (!mounted) return;
@@ -188,6 +254,29 @@ class TetherWorkspaceController extends StateNotifier<TetherSessionState> {
       selectedPhotoId: shouldSelectNew ? incoming.id : state.selectedPhotoId,
       inMemoryPreviews: updatedPreviews,
     );
+  }
+
+  Future<void> _autoBakeFullResInBackground(
+    String photoId,
+    String fullResPath,
+  ) async {
+    final lutData = state.activeLutData;
+    if (lutData == null || state.activeLutId == 'none') {
+      return;
+    }
+    try {
+      final bakedFile = await lutBaker.bakeToFile(
+        sourceImagePath: fullResPath,
+        lutData: lutData,
+        intensity: state.lutIntensity,
+        jpegQuality: 93,
+      );
+      if (mounted) {
+        final nextBaked = Map<String, String>.from(state.bakedFilePaths);
+        nextBaked[photoId] = bakedFile.path;
+        state = state.copyWith(bakedFilePaths: nextBaked);
+      }
+    } catch (_) {}
   }
 
   Future<void> toggleCameraConnection() async {
@@ -207,7 +296,6 @@ class TetherWorkspaceController extends StateNotifier<TetherSessionState> {
   }
 
   void selectPhoto(String photoId, {required bool isLatestPhoto}) {
-    // Clicking an older photo in the filmstrip temporarily pauses Lock Latest
     state = state.copyWith(
       selectedPhotoId: photoId,
       lockLatest: isLatestPhoto ? state.lockLatest : false,
@@ -225,8 +313,9 @@ class TetherWorkspaceController extends StateNotifier<TetherSessionState> {
     final nextLock = !state.lockLatest;
     state = state.copyWith(
       lockLatest: nextLock,
-      selectedPhotoId:
-          (nextLock && latestPhotoId != null) ? latestPhotoId : state.selectedPhotoId,
+      selectedPhotoId: (nextLock && latestPhotoId != null)
+          ? latestPhotoId
+          : state.selectedPhotoId,
     );
   }
 
@@ -257,10 +346,37 @@ class TetherWorkspaceController extends StateNotifier<TetherSessionState> {
   Future<void> setActiveLut(String lutId) async {
     state = state.copyWith(activeLutId: lutId);
     await db.updateSessionActiveLut(state.activeSessionId, lutId);
+    await _loadActiveLutResources(lutId);
   }
 
   void setLutIntensity(double intensity) {
     state = state.copyWith(lutIntensity: intensity.clamp(0.0, 1.0));
+  }
+
+  /// Opens native file picker to import a custom `.cube` file into the preset directory
+  /// and automatically activates it.
+  Future<LutPreset?> pickAndImportCustomCubeFile() async {
+    final result = await FilePicker.platform.pickFiles(
+      type: FileType.any,
+      allowMultiple: false,
+    );
+    if (result == null || result.files.isEmpty) {
+      return null;
+    }
+    final pickedPath = result.files.single.path;
+    if (pickedPath == null) {
+      return null;
+    }
+    return importCustomCubeFromFile(File(pickedPath));
+  }
+
+  Future<LutPreset> importCustomCubeFromFile(File sourceFile) async {
+    final imported = await lutManager.importCustomCubeFile(sourceFile);
+    if (mounted) {
+      state = state.copyWith(availablePresets: lutManager.allPresets);
+      await setActiveLut(imported.id);
+    }
+    return imported;
   }
 
   Future<void> toggleFavorite(Photo photo) async {
@@ -302,7 +418,14 @@ final tetherControllerProvider =
     StateNotifierProvider<TetherWorkspaceController, TetherSessionState>((ref) {
   final db = ref.watch(appDatabaseProvider);
   final driver = ref.watch(cameraDriverProvider);
-  return TetherWorkspaceController(db: db, cameraDriver: driver);
+  final lutManager = ref.watch(lutPresetManagerProvider);
+  final lutBaker = ref.watch(lutBakerServiceProvider);
+  return TetherWorkspaceController(
+    db: db,
+    cameraDriver: driver,
+    lutManager: lutManager,
+    lutBaker: lutBaker,
+  );
 });
 
 final sessionPhotosStreamProvider = StreamProvider<List<Photo>>((ref) {
