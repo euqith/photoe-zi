@@ -95,13 +95,15 @@ class DriveSyncInspectorPanel extends StatelessWidget {
                   padding:
                       const EdgeInsets.symmetric(horizontal: 7, vertical: 3),
                   decoration: BoxDecoration(
-                    color: StudioColors.canvasBackground,
+                    color: isSignedIn
+                        ? StudioColors.canvasBackground
+                        : StudioColors.accentAmber.withValues(alpha: 0.18),
                     borderRadius: BorderRadius.circular(3),
                     border: Border.all(color: StudioColors.accentAmber),
                   ),
-                  child: const Text(
-                    'Set Drive Link',
-                    style: TextStyle(
+                  child: Text(
+                    isSignedIn ? 'Drive Settings' : 'Sign In & Link',
+                    style: const TextStyle(
                       fontSize: 10,
                       fontWeight: FontWeight.w600,
                       color: StudioColors.accentAmber,

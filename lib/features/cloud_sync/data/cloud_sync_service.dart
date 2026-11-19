@@ -8,26 +8,49 @@ class GoogleDriveAccount {
   final String email;
   final String displayName;
   final String? accessToken;
+  final String? refreshToken;
+  final bool isDemoMode;
   final String scope;
 
   const GoogleDriveAccount({
     required this.email,
     required this.displayName,
     this.accessToken,
+    this.refreshToken,
+    this.isDemoMode = false,
     this.scope = 'https://www.googleapis.com/auth/drive.file',
   });
+
+  bool get hasRealAccessToken =>
+      !isDemoMode && accessToken != null && accessToken!.trim().isNotEmpty;
 }
 
 abstract class CloudSyncService {
   static const String driveFileScope =
       'https://www.googleapis.com/auth/drive.file';
+  static const String driveFullScope = 'https://www.googleapis.com/auth/drive';
 
   bool get isSignedIn;
   GoogleDriveAccount? get currentUser;
   bool get isOffline;
   String? get customParentFolderId;
+  String? get lastErrorMessage;
 
-  Future<bool> signIn({String? email, String? accessToken});
+  Future<bool> signIn({
+    String? email,
+    String? accessToken,
+    bool isDemoMode = false,
+  });
+
+  /// Starts a real OAuth 2.0 Loopback Browser Consent flow (`accounts.google.com`)
+  /// using the user's OAuth 2.0 Client ID (and optional Client Secret), opens the
+  /// system browser for Google login, captures the redirect code on `127.0.0.1`,
+  /// and exchanges it for a live Google Drive `access_token`.
+  Future<bool> signInWithBrowserOAuth({
+    required String clientId,
+    String? clientSecret,
+  });
+
   Future<void> signOut();
   void setCustomParentFolder(String? folderIdOrUrl);
   void setOfflineMode(bool offline);

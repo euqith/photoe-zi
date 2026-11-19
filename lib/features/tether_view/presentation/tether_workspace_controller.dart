@@ -27,7 +27,9 @@ class TetherSessionState {
   final String sessionFolderPath;
   final String shareableFolderUrl;
   final bool isGoogleSignedIn;
+  final bool isGoogleDemoMode;
   final String? googleUserEmail;
+  final String? googleAuthError;
   final String? customParentFolderId;
   final AutoUploadMode autoUploadMode;
   final UploadVariant uploadVariant;
@@ -57,8 +59,10 @@ class TetherSessionState {
     this.sessionFolderPath = 'TetherApp / 2026-11-20_Studio_A',
     this.shareableFolderUrl =
         'https://drive.google.com/drive/folders/1GDrive_TetherApp_Studio_A?usp=sharing',
-    this.isGoogleSignedIn = true,
-    this.googleUserEmail = 'studio@photoe-zi.app',
+    this.isGoogleSignedIn = false,
+    this.isGoogleDemoMode = false,
+    this.googleUserEmail,
+    this.googleAuthError,
     this.customParentFolderId,
     this.autoUploadMode = AutoUploadMode.all,
     this.uploadVariant = UploadVariant.bakedLut,
@@ -89,8 +93,11 @@ class TetherSessionState {
     String? sessionFolderPath,
     String? shareableFolderUrl,
     bool? isGoogleSignedIn,
+    bool? isGoogleDemoMode,
     String? googleUserEmail,
     bool clearGoogleUser = false,
+    String? googleAuthError,
+    bool clearGoogleAuthError = false,
     String? customParentFolderId,
     AutoUploadMode? autoUploadMode,
     UploadVariant? uploadVariant,
@@ -122,8 +129,12 @@ class TetherSessionState {
       sessionFolderPath: sessionFolderPath ?? this.sessionFolderPath,
       shareableFolderUrl: shareableFolderUrl ?? this.shareableFolderUrl,
       isGoogleSignedIn: isGoogleSignedIn ?? this.isGoogleSignedIn,
+      isGoogleDemoMode: isGoogleDemoMode ?? this.isGoogleDemoMode,
       googleUserEmail:
           clearGoogleUser ? null : (googleUserEmail ?? this.googleUserEmail),
+      googleAuthError: clearGoogleAuthError
+          ? null
+          : (googleAuthError ?? this.googleAuthError),
       customParentFolderId: customParentFolderId ?? this.customParentFolderId,
       autoUploadMode: autoUploadMode ?? this.autoUploadMode,
       uploadVariant: uploadVariant ?? this.uploadVariant,
@@ -366,16 +377,69 @@ class TetherWorkspaceController extends StateNotifier<TetherSessionState> {
     } catch (_) {}
   }
 
-  // --- Google Drive Cloud Sync Controls (Sprint 3) ---
+  // --- Google Drive Cloud Sync Controls (Sprint 3 & Fix #3.5) ---
 
-  Future<void> signInGoogleAccount(String email, {String? accessToken}) async {
-    await cloudSync.signIn(email: email, accessToken: accessToken);
+  Future<bool> signInGoogleWithAccessToken({
+    required String accessToken,
+    String? email,
+  }) async {
+    final ok = await cloudSync.signIn(
+      email: email,
+      accessToken: accessToken,
+      isDemoMode: false,
+    );
     if (mounted) {
       state = state.copyWith(
         isGoogleSignedIn: cloudSync.isSignedIn,
+        isGoogleDemoMode: cloudSync.currentUser?.isDemoMode ?? false,
         googleUserEmail: cloudSync.currentUser?.email,
+        googleAuthError: cloudSync.lastErrorMessage,
+        clearGoogleAuthError: ok,
       );
     }
+    return ok;
+  }
+
+  Future<bool> signInGoogleWithBrowserOAuth({
+    required String clientId,
+    String? clientSecret,
+  }) async {
+    final ok = await cloudSync.signInWithBrowserOAuth(
+      clientId: clientId,
+      clientSecret: clientSecret,
+    );
+    if (mounted) {
+      state = state.copyWith(
+        isGoogleSignedIn: cloudSync.isSignedIn,
+        isGoogleDemoMode: cloudSync.currentUser?.isDemoMode ?? false,
+        googleUserEmail: cloudSync.currentUser?.email,
+        googleAuthError: cloudSync.lastErrorMessage,
+        clearGoogleAuthError: ok,
+      );
+    }
+    return ok;
+  }
+
+  Future<bool> signInGoogleAccount(
+    String email, {
+    String? accessToken,
+    bool isDemoMode = false,
+  }) async {
+    final ok = await cloudSync.signIn(
+      email: email,
+      accessToken: accessToken,
+      isDemoMode: isDemoMode,
+    );
+    if (mounted) {
+      state = state.copyWith(
+        isGoogleSignedIn: cloudSync.isSignedIn,
+        isGoogleDemoMode: cloudSync.currentUser?.isDemoMode ?? false,
+        googleUserEmail: cloudSync.currentUser?.email,
+        googleAuthError: cloudSync.lastErrorMessage,
+        clearGoogleAuthError: ok,
+      );
+    }
+    return ok;
   }
 
   Future<void> signOutGoogleAccount() async {
@@ -383,7 +447,9 @@ class TetherWorkspaceController extends StateNotifier<TetherSessionState> {
     if (mounted) {
       state = state.copyWith(
         isGoogleSignedIn: false,
+        isGoogleDemoMode: false,
         clearGoogleUser: true,
+        clearGoogleAuthError: true,
       );
     }
   }

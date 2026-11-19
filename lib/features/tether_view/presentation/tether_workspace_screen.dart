@@ -5,6 +5,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:photoe_zi/core/constants/studio_theme.dart';
 import 'package:photoe_zi/core/database/app_database.dart';
 import 'package:photoe_zi/core/utils/exif_and_histogram_utils.dart';
+import 'package:photoe_zi/features/cloud_sync/data/google_drive_cloud_sync_service.dart';
 import 'package:photoe_zi/features/cloud_sync/presentation/drive_sync_panel.dart';
 import 'package:photoe_zi/features/tether_view/presentation/tether_workspace_controller.dart';
 import 'package:photoe_zi/features/tether_view/presentation/widgets/exif_metadata_panel.dart';
@@ -993,18 +994,26 @@ class _TetherWorkspaceScreenState
     TetherWorkspaceController controller,
     TetherSessionState sessionState,
   ) async {
+    final tokenController = TextEditingController();
+    final clientIdController = TextEditingController();
+    final clientSecretController = TextEditingController();
     final emailController = TextEditingController(
-      text: sessionState.googleUserEmail ?? 'photographer@gmail.com',
+      text: sessionState.googleUserEmail ?? 'studio@photoe-zi.app',
     );
     final linkController = TextEditingController(
       text: sessionState.shareableFolderUrl,
     );
+    int selectedAuthTab = 0; // 0: OAuth2 Access Token, 1: Browser OAuth Client ID, 2: Demo Sandbox
     bool setAsDefaultParent = false;
+    bool isAuthenticating = false;
+    String? statusFeedback;
+    bool isErrorFeedback = false;
 
     await showDialog<void>(
       context: context,
       builder: (ctx) => StatefulBuilder(
         builder: (ctx, setDialogState) {
+          final currentState = ref.read(tetherControllerProvider);
           return AlertDialog(
             backgroundColor: StudioColors.panelSurface,
             title: const Row(
@@ -1015,143 +1024,467 @@ class _TetherWorkspaceScreenState
                   size: 20,
                 ),
                 SizedBox(width: 8),
-                Text(
-                  'Google Drive Cloud Sync & Folder Link',
-                  style: TextStyle(
-                    color: StudioColors.textPrimary,
-                    fontSize: 15,
-                    fontWeight: FontWeight.w600,
+                Expanded(
+                  child: Text(
+                    'Google Drive OAuth 2.0 Sign-In & Folder Link',
+                    style: TextStyle(
+                      color: StudioColors.textPrimary,
+                      fontSize: 15,
+                      fontWeight: FontWeight.w600,
+                    ),
                   ),
                 ),
               ],
             ),
             content: SizedBox(
-              width: 400,
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  // Google Account OAuth 2.0 Sign-In / Sign-Out (Issue #3.1)
-                  const Text(
-                    'GOOGLE ACCOUNT (OAuth 2.0 · scope: drive.file)',
-                    style: TextStyle(
-                      color: StudioColors.textMuted,
-                      fontSize: 10,
-                      fontWeight: FontWeight.bold,
-                    ),
-                  ),
-                  const SizedBox(height: 6),
-                  Row(
-                    children: [
-                      Expanded(
-                        child: TextField(
-                          key: const Key('input_google_email'),
-                          controller: emailController,
-                          style: const TextStyle(
-                            color: StudioColors.textPrimary,
-                            fontSize: 12,
+              width: 440,
+              child: SingleChildScrollView(
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    // Current Auth Status Banner
+                    Container(
+                      width: double.infinity,
+                      padding: const EdgeInsets.all(10),
+                      decoration: BoxDecoration(
+                        color: currentState.isGoogleSignedIn
+                            ? StudioColors.statusSuccess.withValues(alpha: 0.14)
+                            : StudioColors.panelElevated,
+                        borderRadius: BorderRadius.circular(6),
+                        border: Border.all(
+                          color: currentState.isGoogleSignedIn
+                              ? StudioColors.statusSuccess
+                              : StudioColors.panelBorder,
+                        ),
+                      ),
+                      child: Row(
+                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                        children: [
+                          Expanded(
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Text(
+                                  currentState.isGoogleSignedIn
+                                      ? (currentState.isGoogleDemoMode
+                                          ? 'Connected (Demo Sandbox Mode)'
+                                          : '✓ Connected to Google Drive API v3')
+                                      : 'Not Signed In to Google Drive',
+                                  style: TextStyle(
+                                    fontSize: 12,
+                                    fontWeight: FontWeight.bold,
+                                    color: currentState.isGoogleSignedIn
+                                        ? StudioColors.statusSuccess
+                                        : StudioColors.textPrimary,
+                                  ),
+                                ),
+                                const SizedBox(height: 2),
+                                Text(
+                                  currentState.isGoogleSignedIn
+                                      ? 'Account: ${currentState.googleUserEmail}'
+                                      : 'Authenticate below so photos upload directly to your Google Drive folder.',
+                                  style: const TextStyle(
+                                    fontSize: 11,
+                                    color: StudioColors.textSecondary,
+                                  ),
+                                ),
+                              ],
+                            ),
                           ),
-                          decoration: const InputDecoration(
-                            isDense: true,
-                            labelText: 'Google Account Email',
-                            border: OutlineInputBorder(),
+                          if (currentState.isGoogleSignedIn)
+                            OutlinedButton(
+                              key: const Key('btn_google_sign_out'),
+                              onPressed: () async {
+                                await controller.signOutGoogleAccount();
+                                setDialogState(() {
+                                  statusFeedback = 'Signed out of Google Drive.';
+                                  isErrorFeedback = false;
+                                });
+                              },
+                              child: const Text('Sign Out'),
+                            ),
+                        ],
+                      ),
+                    ),
+                    const SizedBox(height: 14),
+
+                    // OAuth 2.0 Authentication Form Tabs
+                    const Text(
+                      '1. GOOGLE OAUTH 2.0 AUTHENTICATION FORM',
+                      style: TextStyle(
+                        color: StudioColors.accentAmber,
+                        fontSize: 10.5,
+                        fontWeight: FontWeight.bold,
+                        letterSpacing: 0.5,
+                      ),
+                    ),
+                    const SizedBox(height: 8),
+                    Row(
+                      children: [
+                        Expanded(
+                          child: _authMethodTab(
+                            label: 'OAuth Access Token',
+                            isSelected: selectedAuthTab == 0,
+                            onTap: () => setDialogState(() => selectedAuthTab = 0),
+                          ),
+                        ),
+                        const SizedBox(width: 6),
+                        Expanded(
+                          child: _authMethodTab(
+                            label: 'Browser OAuth Login',
+                            isSelected: selectedAuthTab == 1,
+                            onTap: () => setDialogState(() => selectedAuthTab = 1),
+                          ),
+                        ),
+                        const SizedBox(width: 6),
+                        Expanded(
+                          child: _authMethodTab(
+                            label: 'Demo Sandbox',
+                            isSelected: selectedAuthTab == 2,
+                            onTap: () => setDialogState(() => selectedAuthTab = 2),
+                          ),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 10),
+
+                    if (selectedAuthTab == 0) ...[
+                      const Text(
+                        'Paste a Google OAuth 2.0 Access Token (with https://www.googleapis.com/auth/drive or drive.file scope) to upload real files immediately:',
+                        style: TextStyle(
+                          color: StudioColors.textSecondary,
+                          fontSize: 11,
+                        ),
+                      ),
+                      const SizedBox(height: 6),
+                      Align(
+                        alignment: Alignment.centerLeft,
+                        child: TextButton.icon(
+                          onPressed: () {
+                            GoogleDriveCloudSyncService.openSystemUrl(
+                              'https://developers.google.com/oauthplayground/#step1&apisSelect=https%3A%2F%2Fwww.googleapis.com%2Fauth%2Fdrive&url=https%3A%2F%2F&content_type=application%2Fjson&http_method=GET&useDefaultOauthCred=unchecked',
+                            );
+                          },
+                          style: TextButton.styleFrom(
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 8,
+                              vertical: 4,
+                            ),
+                          ),
+                          icon: const Icon(
+                            Icons.open_in_new_rounded,
+                            size: 14,
+                            color: StudioColors.accentAmber,
+                          ),
+                          label: const Text(
+                            'Open Google OAuth 2.0 Playground to Get Token',
+                            style: TextStyle(
+                              fontSize: 11,
+                              color: StudioColors.accentAmber,
+                            ),
                           ),
                         ),
                       ),
-                      const SizedBox(width: 8),
-                      if (sessionState.isGoogleSignedIn)
-                        OutlinedButton(
-                          key: const Key('btn_google_sign_out'),
-                          onPressed: () async {
-                            await controller.signOutGoogleAccount();
-                            if (ctx.mounted) {
-                              Navigator.of(ctx).pop();
-                            }
-                          },
-                          child: const Text('Sign Out'),
-                        )
-                      else
-                        ElevatedButton(
-                          key: const Key('btn_google_sign_in'),
-                          onPressed: () async {
-                            await controller
-                                .signInGoogleAccount(emailController.text);
-                            if (ctx.mounted) {
-                              Navigator.of(ctx).pop();
-                            }
-                          },
+                      const SizedBox(height: 4),
+                      TextField(
+                        key: const Key('input_google_access_token'),
+                        controller: tokenController,
+                        obscureText: false,
+                        style: const TextStyle(
+                          color: StudioColors.textPrimary,
+                          fontSize: 11.5,
+                          fontFamily: StudioTheme.monospaceFont,
+                        ),
+                        decoration: const InputDecoration(
+                          isDense: true,
+                          labelText: 'OAuth 2.0 Access Token (ya29.a0...)',
+                          hintText: 'ya29.a0AfH6SM...',
+                          border: OutlineInputBorder(),
+                        ),
+                      ),
+                      const SizedBox(height: 8),
+                      SizedBox(
+                        width: double.infinity,
+                        child: ElevatedButton.icon(
+                          key: const Key('btn_verify_oauth_token'),
+                          onPressed: isAuthenticating
+                              ? null
+                              : () async {
+                                  setDialogState(() {
+                                    isAuthenticating = true;
+                                    statusFeedback = null;
+                                  });
+                                  final ok = await controller
+                                      .signInGoogleWithAccessToken(
+                                    accessToken: tokenController.text,
+                                  );
+                                  setDialogState(() {
+                                    isAuthenticating = false;
+                                    isErrorFeedback = !ok;
+                                    statusFeedback = ok
+                                        ? '✓ Verified with Google Drive API v3 as ${ref.read(tetherControllerProvider).googleUserEmail}'
+                                        : (ref
+                                                .read(tetherControllerProvider)
+                                                .googleAuthError ??
+                                            'Authentication failed');
+                                  });
+                                },
                           style: ElevatedButton.styleFrom(
                             backgroundColor: StudioColors.accentAmber,
                             foregroundColor: Colors.black,
                           ),
-                          child: const Text('Sign In'),
+                          icon: isAuthenticating
+                              ? const SizedBox(
+                                  width: 14,
+                                  height: 14,
+                                  child: CircularProgressIndicator(
+                                    strokeWidth: 2,
+                                    color: Colors.black,
+                                  ),
+                                )
+                              : const Icon(Icons.verified_outlined, size: 16),
+                          label: const Text(
+                            'Verify Token & Sign In to Real Google Drive',
+                          ),
                         ),
+                      ),
+                    ] else if (selectedAuthTab == 1) ...[
+                      const Text(
+                        'Enter your GCP Desktop OAuth 2.0 Client ID to open the Google Sign-In consent screen in your browser (http://127.0.0.1 loopback):',
+                        style: TextStyle(
+                          color: StudioColors.textSecondary,
+                          fontSize: 11,
+                        ),
+                      ),
+                      const SizedBox(height: 8),
+                      TextField(
+                        key: const Key('input_google_client_id'),
+                        controller: clientIdController,
+                        style: const TextStyle(
+                          color: StudioColors.textPrimary,
+                          fontSize: 11.5,
+                          fontFamily: StudioTheme.monospaceFont,
+                        ),
+                        decoration: const InputDecoration(
+                          isDense: true,
+                          labelText: 'OAuth 2.0 Client ID (*.apps.googleusercontent.com)',
+                          border: OutlineInputBorder(),
+                        ),
+                      ),
+                      const SizedBox(height: 8),
+                      TextField(
+                        key: const Key('input_google_client_secret'),
+                        controller: clientSecretController,
+                        obscureText: true,
+                        style: const TextStyle(
+                          color: StudioColors.textPrimary,
+                          fontSize: 11.5,
+                          fontFamily: StudioTheme.monospaceFont,
+                        ),
+                        decoration: const InputDecoration(
+                          isDense: true,
+                          labelText: 'Client Secret (Optional for Desktop PKCE)',
+                          border: OutlineInputBorder(),
+                        ),
+                      ),
+                      const SizedBox(height: 8),
+                      SizedBox(
+                        width: double.infinity,
+                        child: ElevatedButton.icon(
+                          key: const Key('btn_launch_browser_oauth'),
+                          onPressed: isAuthenticating
+                              ? null
+                              : () async {
+                                  setDialogState(() {
+                                    isAuthenticating = true;
+                                    statusFeedback =
+                                        'Waiting for Google Sign-In in browser...';
+                                    isErrorFeedback = false;
+                                  });
+                                  final ok = await controller
+                                      .signInGoogleWithBrowserOAuth(
+                                    clientId: clientIdController.text,
+                                    clientSecret: clientSecretController.text,
+                                  );
+                                  setDialogState(() {
+                                    isAuthenticating = false;
+                                    isErrorFeedback = !ok;
+                                    statusFeedback = ok
+                                        ? '✓ Signed in via Google Browser OAuth!'
+                                        : (ref
+                                                .read(tetherControllerProvider)
+                                                .googleAuthError ??
+                                            'Browser OAuth failed');
+                                  });
+                                },
+                          style: ElevatedButton.styleFrom(
+                            backgroundColor: StudioColors.accentAmber,
+                            foregroundColor: Colors.black,
+                          ),
+                          icon: const Icon(Icons.open_in_browser_rounded, size: 16),
+                          label: const Text('Sign In with Google in Browser'),
+                        ),
+                      ),
+                    ] else ...[
+                      const Text(
+                        'Demo Sandbox Mode simulates upload queue & QR Code sharing locally without sending files over the network:',
+                        style: TextStyle(
+                          color: StudioColors.textSecondary,
+                          fontSize: 11,
+                        ),
+                      ),
+                      const SizedBox(height: 8),
+                      Row(
+                        children: [
+                          Expanded(
+                            child: TextField(
+                              key: const Key('input_google_email'),
+                              controller: emailController,
+                              style: const TextStyle(
+                                color: StudioColors.textPrimary,
+                                fontSize: 12,
+                              ),
+                              decoration: const InputDecoration(
+                                isDense: true,
+                                labelText: 'Demo Photographer Email',
+                                border: OutlineInputBorder(),
+                              ),
+                            ),
+                          ),
+                          const SizedBox(width: 8),
+                          ElevatedButton(
+                            key: const Key('btn_google_sign_in'),
+                            onPressed: () async {
+                              await controller.signInGoogleAccount(
+                                emailController.text,
+                                isDemoMode: true,
+                              );
+                              setDialogState(() {
+                                isErrorFeedback = false;
+                                statusFeedback =
+                                    'Signed in (Demo Sandbox Mode).';
+                              });
+                            },
+                            style: ElevatedButton.styleFrom(
+                              backgroundColor: StudioColors.accentAmber,
+                              foregroundColor: Colors.black,
+                            ),
+                            child: const Text('Enable Demo'),
+                          ),
+                        ],
+                      ),
                     ],
-                  ),
-                  const Padding(
-                    padding: EdgeInsets.symmetric(vertical: 12),
-                    child: Divider(height: 1, color: StudioColors.panelBorder),
-                  ),
 
-                  // Register / Set Custom Google Drive Folder Link or ID
-                  const Text(
-                    'REGISTER GOOGLE DRIVE FOLDER LINK / FOLDER ID',
-                    style: TextStyle(
-                      color: StudioColors.textMuted,
-                      fontSize: 10,
-                      fontWeight: FontWeight.bold,
+                    if (statusFeedback != null) ...[
+                      const SizedBox(height: 8),
+                      Container(
+                        width: double.infinity,
+                        padding: const EdgeInsets.all(8),
+                        decoration: BoxDecoration(
+                          color: isErrorFeedback
+                              ? StudioColors.statusError.withValues(alpha: 0.14)
+                              : StudioColors.statusSuccess
+                                  .withValues(alpha: 0.14),
+                          borderRadius: BorderRadius.circular(4),
+                          border: Border.all(
+                            color: isErrorFeedback
+                                ? StudioColors.statusError
+                                : StudioColors.statusSuccess,
+                          ),
+                        ),
+                        child: Text(
+                          statusFeedback!,
+                          style: TextStyle(
+                            fontSize: 11,
+                            color: isErrorFeedback
+                                ? StudioColors.statusError
+                                : StudioColors.statusSuccess,
+                          ),
+                        ),
+                      ),
+                    ],
+
+                    const Padding(
+                      padding: EdgeInsets.symmetric(vertical: 12),
+                      child: Divider(height: 1, color: StudioColors.panelBorder),
                     ),
-                  ),
-                  const SizedBox(height: 6),
-                  TextField(
-                    key: const Key('input_gdrive_folder_link'),
-                    controller: linkController,
-                    style: const TextStyle(
-                      color: StudioColors.textPrimary,
-                      fontSize: 12,
-                      fontFamily: StudioTheme.monospaceFont,
-                    ),
-                    decoration: const InputDecoration(
-                      isDense: true,
-                      labelText: 'Google Drive Folder URL or Folder ID',
-                      hintText:
-                          'https://drive.google.com/drive/folders/1AbCdEfGhIjK...',
-                      border: OutlineInputBorder(),
-                    ),
-                  ),
-                  const SizedBox(height: 6),
-                  CheckboxListTile(
-                    contentPadding: EdgeInsets.zero,
-                    dense: true,
-                    value: setAsDefaultParent,
-                    activeColor: StudioColors.accentAmber,
-                    title: const Text(
-                      'Also use as custom parent folder for future sessions',
+
+                    // Register / Set Custom Google Drive Folder Link or ID
+                    const Text(
+                      '2. REGISTER GOOGLE DRIVE FOLDER LINK / FOLDER ID',
                       style: TextStyle(
-                        color: StudioColors.textSecondary,
-                        fontSize: 11,
+                        color: StudioColors.accentAmber,
+                        fontSize: 10.5,
+                        fontWeight: FontWeight.bold,
+                        letterSpacing: 0.5,
                       ),
                     ),
-                    onChanged: (val) {
-                      setDialogState(() {
-                        setAsDefaultParent = val ?? false;
-                      });
-                    },
-                  ),
-                ],
+                    const SizedBox(height: 6),
+                    TextField(
+                      key: const Key('input_gdrive_folder_link'),
+                      controller: linkController,
+                      style: const TextStyle(
+                        color: StudioColors.textPrimary,
+                        fontSize: 12,
+                        fontFamily: StudioTheme.monospaceFont,
+                      ),
+                      decoration: const InputDecoration(
+                        isDense: true,
+                        labelText: 'Google Drive Folder URL or Folder ID',
+                        hintText:
+                            'https://drive.google.com/drive/folders/1AbCdEfGhIjK...',
+                        border: OutlineInputBorder(),
+                      ),
+                    ),
+                    const SizedBox(height: 6),
+                    CheckboxListTile(
+                      contentPadding: EdgeInsets.zero,
+                      dense: true,
+                      value: setAsDefaultParent,
+                      activeColor: StudioColors.accentAmber,
+                      title: const Text(
+                        'Also use as custom parent folder for future sessions',
+                        style: TextStyle(
+                          color: StudioColors.textSecondary,
+                          fontSize: 11,
+                        ),
+                      ),
+                      onChanged: (val) {
+                        setDialogState(() {
+                          setAsDefaultParent = val ?? false;
+                        });
+                      },
+                    ),
+                  ],
+                ),
               ),
             ),
             actions: [
               TextButton(
                 onPressed: () => Navigator.of(ctx).pop(),
-                child: const Text('Cancel'),
+                child: const Text('Close'),
               ),
               ElevatedButton.icon(
                 key: const Key('btn_save_gdrive_link'),
                 onPressed: () async {
-                  if (!sessionState.isGoogleSignedIn) {
-                    await controller.signInGoogleAccount(emailController.text);
+                  // If the user pasted an access token in Tab 0 and clicked Save directly, verify & sign in first
+                  if (tokenController.text.trim().isNotEmpty) {
+                    final ok = await controller.signInGoogleWithAccessToken(
+                      accessToken: tokenController.text,
+                    );
+                    if (!ok) {
+                      setDialogState(() {
+                        isErrorFeedback = true;
+                        statusFeedback = ref
+                                .read(tetherControllerProvider)
+                                .googleAuthError ??
+                            'Invalid OAuth 2.0 Access Token';
+                      });
+                      return;
+                    }
                   }
+
                   await controller.registerCustomDriveFolderLink(
                     linkController.text,
                     setAsDefaultParent: setAsDefaultParent,
@@ -1160,7 +1493,9 @@ class _TetherWorkspaceScreenState
                     Navigator.of(ctx).pop();
                     ScaffoldMessenger.of(context).showSnackBar(
                       const SnackBar(
-                        content: Text('Google Drive Folder Link saved & synced!'),
+                        content: Text(
+                          'Google Drive Folder Link saved & ready for upload!',
+                        ),
                       ),
                     );
                   }
@@ -1170,11 +1505,47 @@ class _TetherWorkspaceScreenState
                   foregroundColor: Colors.black,
                 ),
                 icon: const Icon(Icons.save_outlined, size: 15),
-                label: const Text('Save Drive Link'),
+                label: const Text('Save Folder Link'),
               ),
             ],
           );
         },
+      ),
+    );
+  }
+
+  Widget _authMethodTab({
+    required String label,
+    required bool isSelected,
+    required VoidCallback onTap,
+  }) {
+    return InkWell(
+      onTap: onTap,
+      borderRadius: BorderRadius.circular(4),
+      child: Container(
+        padding: const EdgeInsets.symmetric(vertical: 6, horizontal: 6),
+        alignment: Alignment.center,
+        decoration: BoxDecoration(
+          color: isSelected
+              ? StudioColors.accentAmber.withValues(alpha: 0.18)
+              : StudioColors.panelElevated,
+          borderRadius: BorderRadius.circular(4),
+          border: Border.all(
+            color:
+                isSelected ? StudioColors.accentAmber : StudioColors.panelBorder,
+          ),
+        ),
+        child: Text(
+          label,
+          style: TextStyle(
+            fontSize: 10.5,
+            fontWeight: isSelected ? FontWeight.w600 : FontWeight.normal,
+            color: isSelected
+                ? StudioColors.accentAmber
+                : StudioColors.textSecondary,
+          ),
+          overflow: TextOverflow.ellipsis,
+        ),
       ),
     );
   }

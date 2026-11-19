@@ -1,8 +1,11 @@
+import 'dart:convert';
 import 'dart:io';
 
 import 'package:drift/drift.dart' hide isNotNull, isNull;
 import 'package:drift/native.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:http/http.dart' as http;
+import 'package:http/testing.dart';
 import 'package:image/image.dart' as img;
 import 'package:photoe_zi/core/database/app_database.dart';
 import 'package:photoe_zi/features/cloud_sync/data/cloud_sync_service.dart';
@@ -28,6 +31,7 @@ void main() {
       lutBaker: const LutBakerService(),
       chunkDelay: const Duration(milliseconds: 10),
       maxRetries: 2,
+      startInDemoMode: true,
     );
   });
 
@@ -194,6 +198,120 @@ void main() {
         syncService.isFolderPubliclyShared('1StudioShareFolderXYZ'),
         isTrue,
       );
+    });
+  });
+
+  group('Fix #3.5 — Real OAuth2 Token Auth & Google Drive API v3 Resumable Upload',
+      () {
+    test(
+        'verifies real OAuth2 access token via /drive/v3/about and uploads JPEG bytes via /upload/drive/v3/files?uploadType=resumable',
+        () async {
+      final recordedRequests = <String>[];
+      int uploadedByteLength = 0;
+
+      final mockHttp = MockClient((http.Request request) async {
+        recordedRequests.add('${request.method} ${request.url}');
+
+        // 1. Token Verification: GET /drive/v3/about?fields=user
+        if (request.url.path.endsWith('/drive/v3/about')) {
+          expect(request.headers['Authorization'], 'Bearer ya29.live_token_123');
+          return http.Response(
+            jsonEncode({
+              'user': {
+                'emailAddress': 'real.photographer@gmail.com',
+                'displayName': 'Real Photographer',
+              }
+            }),
+            200,
+          );
+        }
+
+        // 2. Resumable Upload Initiation: POST /upload/drive/v3/files?uploadType=resumable
+        if (request.method == 'POST' &&
+            request.url.path.endsWith('/upload/drive/v3/files') &&
+            request.url.queryParameters['uploadType'] == 'resumable') {
+          final meta = jsonDecode(request.body) as Map<String, dynamic>;
+          expect(meta['name'], 'IMG_9001.JPG');
+          expect(meta['parents'], ['1RealTargetDriveFolderID']);
+          return http.Response(
+            '',
+            200,
+            headers: {
+              'location':
+                  'https://www.googleapis.com/upload/drive/v3/files?uploadType=resumable&upload_id=session_abc_999',
+            },
+          );
+        }
+
+        // 3. Resumable Upload Bytes PUT
+        if (request.method == 'PUT' &&
+            request.url.queryParameters['upload_id'] == 'session_abc_999') {
+          uploadedByteLength = request.bodyBytes.length;
+          return http.Response(
+            jsonEncode({
+              'id': '1RealUploadedGoogleDriveFileID_9001',
+              'name': 'IMG_9001.JPG',
+            }),
+            200,
+          );
+        }
+
+        return http.Response('Not found', 404);
+      });
+
+      final realService = GoogleDriveCloudSyncService(
+        db: db,
+        lutManager: lutManager,
+        lutBaker: const LutBakerService(),
+        httpClient: mockHttp,
+      );
+
+      // Default is NOT signed in
+      expect(realService.isSignedIn, isFalse);
+
+      // Sign in with real OAuth 2.0 Access Token
+      final authOk = await realService.signIn(
+        accessToken: 'ya29.live_token_123',
+      );
+      expect(authOk, isTrue);
+      expect(realService.currentUser?.email, 'real.photographer@gmail.com');
+      expect(realService.currentUser?.hasRealAccessToken, isTrue);
+
+      final samplePath = await createSampleJpegFile('IMG_9001.JPG');
+      await db.createSession(
+        SessionsCompanion.insert(
+          id: 's_real',
+          name: 'Real_Shoot',
+          createdAt: DateTime.now(),
+        ),
+      );
+      await db.upsertPhoto(
+        PhotosCompanion.insert(
+          id: 'p_9001',
+          sessionId: 's_real',
+          fileName: 'IMG_9001.JPG',
+          fullResPath: Value(samplePath),
+          capturedAt: DateTime.now(),
+        ),
+      );
+
+      await realService.enqueuePhoto(
+        localPhotoId: 'p_9001',
+        driveFolderId:
+            'https://drive.google.com/drive/folders/1RealTargetDriveFolderID?usp=sharing',
+        variant: UploadVariant.bakedLut,
+        activeLutId: 'classic_chrome',
+      );
+
+      await Future<void>.delayed(const Duration(milliseconds: 350));
+
+      final queueItems = await db.getUploadQueueForPhoto('p_9001');
+      expect(queueItems.single.status, 'completed');
+      expect(
+        queueItems.single.remoteFileId,
+        '1RealUploadedGoogleDriveFileID_9001',
+      );
+      expect(uploadedByteLength, greaterThan(100));
     });
   });
 }
