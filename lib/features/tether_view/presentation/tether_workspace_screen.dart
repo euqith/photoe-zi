@@ -290,6 +290,7 @@ class _TetherWorkspaceScreenState
             syncedCount: syncedCount,
             queuedCount: queuedCount,
             failedCount: failedCount,
+            lastUploadError: sessionState.googleAuthError,
             onSelectLut: controller.setActiveLut,
             onIntensityChanged: controller.setLutIntensity,
             onImportCube: () => _showImportCubeDialog(context, controller),
@@ -564,6 +565,7 @@ class _TetherWorkspaceScreenState
                         syncedCount: syncedCount,
                         queuedCount: queuedCount,
                         failedCount: failedCount,
+                        lastUploadError: sessionState.googleAuthError,
                         onOpenDriveSettings: () =>
                             _showGoogleDriveSettingsDialog(
                           context,

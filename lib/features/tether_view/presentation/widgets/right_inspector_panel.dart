@@ -26,6 +26,7 @@ class RightInspectorPanel extends StatelessWidget {
   final int syncedCount;
   final int queuedCount;
   final int failedCount;
+  final String? lastUploadError;
   final ValueChanged<String> onSelectLut;
   final ValueChanged<double> onIntensityChanged;
   final VoidCallback? onImportCube;
@@ -57,6 +58,7 @@ class RightInspectorPanel extends StatelessWidget {
     this.syncedCount = 0,
     this.queuedCount = 0,
     this.failedCount = 0,
+    this.lastUploadError,
     required this.onSelectLut,
     required this.onIntensityChanged,
     this.onImportCube,
@@ -225,6 +227,7 @@ class RightInspectorPanel extends StatelessWidget {
             syncedCount: syncedCount,
             queuedCount: queuedCount,
             failedCount: failedCount,
+            lastUploadError: lastUploadError,
             onOpenDriveSettings: onOpenDriveSettings,
             onAutoUploadModeChanged: onAutoUploadModeChanged,
             onUploadVariantChanged: onUploadVariantChanged,

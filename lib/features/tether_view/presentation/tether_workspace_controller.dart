@@ -209,6 +209,7 @@ class TetherWorkspaceController extends StateNotifier<TetherSessionState> {
   StreamSubscription<CameraConnectionState>? _connSub;
   StreamSubscription<IncomingPhoto>? _photoSub;
   StreamSubscription<Map<String, double>>? _progressSub;
+  StreamSubscription<String?>? _errorSub;
 
   TetherWorkspaceController({
     required this.db,
@@ -274,6 +275,14 @@ class TetherWorkspaceController extends StateNotifier<TetherSessionState> {
     _progressSub = cloudSync.uploadProgressStream.listen((progressMap) {
       if (mounted) {
         state = state.copyWith(uploadProgressByPhotoId: progressMap);
+      }
+    });
+    _errorSub = cloudSync.errorStream.listen((errMsg) {
+      if (mounted) {
+        state = state.copyWith(
+          googleAuthError: errMsg,
+          clearGoogleAuthError: errMsg == null,
+        );
       }
     });
   }
@@ -505,7 +514,10 @@ class TetherWorkspaceController extends StateNotifier<TetherSessionState> {
   }
 
   Future<void> retryFailedUploads() async {
-    await cloudSync.retryFailedUploads();
+    await cloudSync.retryFailedUploads(
+      driveFolderId: state.driveFolderId,
+      activeLutId: state.activeLutId,
+    );
   }
 
   Future<String> prepareShareableSessionLink() async {
@@ -692,6 +704,7 @@ class TetherWorkspaceController extends StateNotifier<TetherSessionState> {
     _connSub?.cancel();
     _photoSub?.cancel();
     _progressSub?.cancel();
+    _errorSub?.cancel();
     super.dispose();
   }
 }

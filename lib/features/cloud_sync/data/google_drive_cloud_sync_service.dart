@@ -28,6 +28,8 @@ class GoogleDriveCloudSyncService implements CloudSyncService {
   final Map<String, double> _progressByPhotoId = {};
   final StreamController<Map<String, double>> _progressController =
       StreamController<Map<String, double>>.broadcast();
+  final StreamController<String?> _errorController =
+      StreamController<String?>.broadcast();
   final Map<String, String> _sessionFolderNames = {};
   final Map<String, String> _subfolderCache = {};
   final Set<String> _publicSharedFolders = {};
@@ -64,6 +66,15 @@ class GoogleDriveCloudSyncService implements CloudSyncService {
 
   @override
   String? get lastErrorMessage => _lastErrorMessage;
+
+  Stream<String?> get errorStream => _errorController.stream;
+
+  void _setError(String? message) {
+    _lastErrorMessage = message;
+    if (!_errorController.isClosed) {
+      _errorController.add(message);
+    }
+  }
 
   bool isFolderPubliclyShared(String folderId) => _publicSharedFolders
       .contains(CloudSyncService.extractDriveFolderId(folderId));
@@ -441,11 +452,19 @@ class GoogleDriveCloudSyncService implements CloudSyncService {
   }
 
   @override
-  Future<void> retryFailedUploads() async {
-    _lastErrorMessage = null;
+  Future<void> retryFailedUploads({
+    String? driveFolderId,
+    String? activeLutId,
+  }) async {
+    _setError(null);
     await db.resetFailedUploadsToPending();
     if (!_isOffline && isSignedIn) {
-      unawaited(_processQueue());
+      unawaited(
+        _processQueue(
+          driveFolderId: driveFolderId,
+          activeLutId: activeLutId,
+        ),
+      );
     }
   }
 
@@ -536,6 +555,7 @@ class GoogleDriveCloudSyncService implements CloudSyncService {
 
     // 2. Upload JPEG bytes to the resumable session URI
     final putRequest = http.Request('PUT', Uri.parse(uploadLocation))
+      ..headers['Authorization'] = 'Bearer $token'
       ..headers['Content-Type'] = 'image/jpeg'
       ..bodyBytes = fileBytes;
 
@@ -589,7 +609,21 @@ class GoogleDriveCloudSyncService implements CloudSyncService {
 
     try {
       final photo = await db.getPhotoById(photoId);
-      final sourcePath = photo?.fullResPath ?? photo?.previewPath;
+      if (photo == null) {
+        throw Exception('Photo record not found in local database ($photoId)');
+      }
+      final session = await db.getSessionById(photo.sessionId);
+      final resolvedLutId = activeLutId ?? session?.activeLutId ?? 'classic_chrome';
+      final resolvedDriveFolderId =
+          driveFolderId ?? session?.driveFolderId ?? _customParentFolderId ?? '';
+
+      String? sourcePath = photo.fullResPath ?? photo.previewPath;
+      if (sourcePath == null || !File(sourcePath).existsSync()) {
+        // Fallback to previewPath if fullResPath is missing
+        if (photo.previewPath != null && File(photo.previewPath!).existsSync()) {
+          sourcePath = photo.previewPath;
+        }
+      }
       String? bakedFilePath;
 
       // Step 1: If Baked LUT or Both is selected, run LutBakerService before upload
@@ -601,9 +635,10 @@ class GoogleDriveCloudSyncService implements CloudSyncService {
         );
         _emitProgress(photoId, 0.1);
 
-        final lutId = activeLutId ?? 'classic_chrome';
-        if (sourcePath != null && lutId != 'none') {
-          final lutData = await lutManager.getLutData(lutId);
+        if (sourcePath != null &&
+            File(sourcePath).existsSync() &&
+            resolvedLutId != 'none') {
+          final lutData = await lutManager.getLutData(resolvedLutId);
           if (lutData != null) {
             final bakedFile = await lutBaker.bakeToFile(
               sourceImagePath: sourcePath,
@@ -645,12 +680,10 @@ class GoogleDriveCloudSyncService implements CloudSyncService {
         }
 
         final token = user.accessToken!;
-        final targetFolder =
-            driveFolderId ?? _customParentFolderId ?? '';
         final cleanParentId =
-            CloudSyncService.extractDriveFolderId(targetFolder);
+            CloudSyncService.extractDriveFolderId(resolvedDriveFolderId);
 
-        final fileName = photo?.fileName ?? '$photoId.JPG';
+        final fileName = photo.fileName;
         final origBytes = (sourcePath != null && File(sourcePath).existsSync())
             ? await File(sourcePath).readAsBytes()
             : Uint8List(0);
@@ -658,6 +691,12 @@ class GoogleDriveCloudSyncService implements CloudSyncService {
             (bakedFilePath != null && File(bakedFilePath).existsSync())
                 ? await File(bakedFilePath).readAsBytes()
                 : origBytes;
+
+        if (bakedBytes.isEmpty && origBytes.isEmpty) {
+          throw Exception(
+            'Local image file missing for $fileName. Take a new shot to upload.',
+          );
+        }
 
         String remoteId;
         if (variant == UploadVariant.bakedLut) {
@@ -705,6 +744,7 @@ class GoogleDriveCloudSyncService implements CloudSyncService {
           remoteId = '${idEdited}_$idOrig';
         }
 
+        _setError(null);
         await db.updateUploadStatus(
           id: item.id,
           status: 'completed',
@@ -757,7 +797,8 @@ class GoogleDriveCloudSyncService implements CloudSyncService {
       );
       _emitProgress(photoId, 1.0);
     } catch (e) {
-      _lastErrorMessage = e.toString();
+      final cleanErr = e.toString().replaceFirst('Exception: ', '');
+      _setError(cleanErr);
       final nextRetry = item.retryCount + 1;
       if (nextRetry <= maxRetries && !_isOffline) {
         final backoffMs = 40 * math.pow(2, nextRetry - 1).toInt();
@@ -824,6 +865,7 @@ class GoogleDriveCloudSyncService implements CloudSyncService {
 
   void dispose() {
     _progressController.close();
+    _errorController.close();
     _httpClient.close();
   }
 }

@@ -15,6 +15,7 @@ class DriveSyncInspectorPanel extends StatelessWidget {
   final int syncedCount;
   final int queuedCount;
   final int failedCount;
+  final String? lastUploadError;
   final VoidCallback onOpenDriveSettings;
   final ValueChanged<AutoUploadMode> onAutoUploadModeChanged;
   final ValueChanged<UploadVariant> onUploadVariantChanged;
@@ -34,6 +35,7 @@ class DriveSyncInspectorPanel extends StatelessWidget {
     required this.syncedCount,
     required this.queuedCount,
     required this.failedCount,
+    this.lastUploadError,
     required this.onOpenDriveSettings,
     required this.onAutoUploadModeChanged,
     required this.onUploadVariantChanged,
@@ -314,6 +316,29 @@ class DriveSyncInspectorPanel extends StatelessWidget {
               ),
             ],
           ),
+
+          if (lastUploadError != null && lastUploadError!.isNotEmpty) ...[
+            const SizedBox(height: 8),
+            Container(
+              width: double.infinity,
+              padding: const EdgeInsets.all(8),
+              decoration: BoxDecoration(
+                color: StudioColors.statusError.withValues(alpha: 0.12),
+                borderRadius: BorderRadius.circular(6),
+                border: Border.all(
+                  color: StudioColors.statusError.withValues(alpha: 0.45),
+                ),
+              ),
+              child: Text(
+                lastUploadError!,
+                style: const TextStyle(
+                  fontSize: 10,
+                  color: StudioColors.statusError,
+                  height: 1.35,
+                ),
+              ),
+            ),
+          ],
 
           if (failedCount > 0) ...[
             const SizedBox(height: 8),

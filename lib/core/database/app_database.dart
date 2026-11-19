@@ -140,6 +140,7 @@ class AppDatabase extends _$AppDatabase {
         const UploadQueueCompanion(
           status: Value('pending'),
           progress: Value(0.0),
+          retryCount: Value(0),
         ),
       );
 
