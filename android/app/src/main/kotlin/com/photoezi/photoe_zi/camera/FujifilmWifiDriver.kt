@@ -127,11 +127,24 @@ class FujifilmWifiDriver(
                 }
             }
 
-            // 3. Send Open Session (PTP 0x1002) with SessionID = 1
-            sendPtpCommand(0x1002, listOf(1)) // Session ID 1
+            // 3. Complete Fujifilm X-T10 Session Initialization Sequence:
+            //    a) OpenSession (0x1002, param = 1)
+            sendFujiSingleCommand(0x1002, byteArrayOf(0x01, 0x00, 0x00, 0x00), "OpenSession(0x1002)")
+            //    b) SetDevicePropValue (0x1016) on 0xDF01 = 0x0005 (Remote Mode)
+            sendFujiTwoPartCommand(byteArrayOf(0x01, 0xDF.toByte(), 0x00, 0x00), byteArrayOf(0x05, 0x00), "SetInitMode(0xDF01=5)")
+            //    c) GetDevicePropValue (0x1015) on 0xDF24
+            sendFujiSingleCommand(0x1015, byteArrayOf(0x24, 0xDF.toByte(), 0x00, 0x00), "GetRemoteModeVersion(0xDF24)")
+            //    d) SetDevicePropValue (0x1016) on 0xDF24 = FF 00 02 00
+            sendFujiTwoPartCommand(byteArrayOf(0x24, 0xDF.toByte(), 0x00, 0x00), byteArrayOf(0xFF.toByte(), 0x00, 0x02, 0x00), "SetRemoteModeConfig(0xDF24)")
+            //    e) CameraCapabilities (0x902B)
+            sendFujiSingleCommand(0x902B, byteArrayOf(), "CameraCapabilities(0x902B)")
+            //    f) EnterCameraRemote (0x101C, 8 zero bytes) - transitions camera screen out of "Waiting for connection"!
+            sendFujiSingleCommand(0x101C, ByteArray(8), "EnterCameraRemote(0x101C)")
+            //    g) StatusRequest (0x1015 on 0xD212)
+            sendFujiSingleCommand(0x1015, byteArrayOf(0x12, 0xD2.toByte(), 0x00, 0x00), "StatusRequest(0xD212)")
 
-            // 4. Connect Event Socket if supported
-            connectEventSocket(ipAddress, port)
+            // 4. Connect Event Socket on port 55741
+            connectEventSocket(ipAddress, 55741)
 
             socket.soTimeout = 0 // Remove timeout for regular event listening
             isConnected = true
@@ -232,26 +245,70 @@ class FujifilmWifiDriver(
         }
     }
 
-    private fun sendPtpCommand(opCode: Int, params: List<Int>) {
-        // Fujifilm port 55740 16-byte OpenSession / Operation Request container:
-        // [0..3]: Length (12 + params.size * 4)
-        // [4..5]: Container Type = 1 (Operation Request, UInt16 LE)
-        // [6..7]: OpCode (UInt16 LE)
-        // [8..11]: Transaction ID (UInt32 LE)
-        // [12..]: Parameters (UInt32 LE each)
-        val payloadLen = 4 + 2 + 2 + 4 + (params.size * 4)
-        val buf = ByteBuffer.allocate(payloadLen).order(ByteOrder.LITTLE_ENDIAN)
-        buf.putInt(payloadLen)
-        buf.putShort(1) // Container Type 1 = Operation Request
-        buf.putShort(opCode.toShort())
-        buf.putInt(transactionId++)
-        for (param in params) {
-            buf.putInt(param)
+    private fun makeFujiPacket(index: Int, type: Int, id: Int, payload: ByteArray): ByteArray {
+        val totalLen = 4 + 2 + 2 + 4 + payload.size
+        val buf = ByteBuffer.allocate(totalLen).order(ByteOrder.LITTLE_ENDIAN)
+        buf.putInt(totalLen)
+        buf.putShort(index.toShort())
+        buf.putShort(type.toShort())
+        buf.putInt(id)
+        if (payload.isNotEmpty()) {
+            buf.put(payload)
         }
-        val txHex = buf.array().joinToString(" ") { String.format("%02X", it) }
-        println("[PtpIp] TX PTP Command 0x${String.format("%04X", opCode)} ($payloadLen bytes): $txHex")
-        cmdOut?.write(buf.array())
+        return buf.array()
+    }
+
+    private fun readFujiPacket(): ByteArray {
+        val stream = cmdIn ?: throw Exception("Command stream closed")
+        val lenBytes = readExact(stream, 4) ?: throw Exception("EOF reading packet length")
+        val totalLen = ByteBuffer.wrap(lenBytes).order(ByteOrder.LITTLE_ENDIAN).int
+        if (totalLen <= 4 || totalLen > 10_000_000) {
+            throw Exception("Invalid Fuji packet length: $totalLen")
+        }
+        val body = readExact(stream, totalLen - 4) ?: throw Exception("EOF reading packet body")
+        val full = ByteArray(totalLen)
+        System.arraycopy(lenBytes, 0, full, 0, 4)
+        System.arraycopy(body, 0, full, 4, body.size)
+        val previewLen = minOf(full.size, 84)
+        val rxHex = full.take(previewLen).joinToString(" ") { String.format("%02X", it) }
+        println("[PtpIp] RX Packet (${full.size} bytes): $rxHex")
+        return full
+    }
+
+    private fun readUntilFujiOkResponse() {
+        while (true) {
+            val pkt = readFujiPacket()
+            if (pkt.size < 8) throw Exception("Short Fuji response packet")
+            val buf = ByteBuffer.wrap(pkt, 4, 4).order(ByteOrder.LITTLE_ENDIAN)
+            val containerType = buf.short.toInt() and 0xFFFF
+            val code = buf.short.toInt() and 0xFFFF
+            if (containerType == 3) {
+                if (code == 0x2001) return
+                throw Exception("Fuji command failed with code 0x${String.format("%04X", code)}")
+            }
+        }
+    }
+
+    private fun sendFujiSingleCommand(type: Int, payload: ByteArray, label: String) {
+        val tid = transactionId++
+        val pkt = makeFujiPacket(1, type, tid, payload)
+        val txHex = pkt.joinToString(" ") { String.format("%02X", it) }
+        println("[PtpIp] TX $label [id=$tid] (${pkt.size} bytes): $txHex")
+        cmdOut?.write(pkt)
         cmdOut?.flush()
+        readUntilFujiOkResponse()
+    }
+
+    private fun sendFujiTwoPartCommand(propCodePayload: ByteArray, valuePayload: ByteArray, label: String) {
+        val tid = transactionId++
+        val pkt1 = makeFujiPacket(1, 0x1016, tid, propCodePayload)
+        val pkt2 = makeFujiPacket(2, 0x1016, tid, valuePayload)
+        println("[PtpIp] TX $label Part1 [id=$tid] (${pkt1.size} bytes)")
+        println("[PtpIp] TX $label Part2 [id=$tid] (${pkt2.size} bytes)")
+        cmdOut?.write(pkt1)
+        cmdOut?.write(pkt2)
+        cmdOut?.flush()
+        readUntilFujiOkResponse()
     }
 
     private fun readExact(stream: InputStream, count: Int): ByteArray? {
