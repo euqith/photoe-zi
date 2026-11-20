@@ -53,6 +53,13 @@ class CameraBridgeManager(
     init {
         methodChannel.setMethodCallHandler(this)
         eventChannel.setStreamHandler(this)
+
+        usbDriver.onLiveViewStatusChange = { status ->
+            sendEvent("liveViewStatus", mapOf("status" to status))
+        }
+        usbDriver.onLiveViewFrame = { frame ->
+            sendEvent("liveViewFrame", frame)
+        }
     }
 
     override fun onListen(arguments: Any?, events: EventChannel.EventSink?) {
@@ -174,6 +181,30 @@ class CameraBridgeManager(
             "enableCellularSync" -> {
                 dualNetworkManager.enableCellularRouting()
                 result.success(true)
+            }
+
+            "startLiveView" -> {
+                val ok = when (activeDriverType) {
+                    "canon_usb" -> usbDriver.startLiveView()
+                    else -> true
+                }
+                result.success(ok)
+            }
+
+            "stopLiveView" -> {
+                val ok = when (activeDriverType) {
+                    "canon_usb" -> usbDriver.stopLiveView()
+                    else -> true
+                }
+                result.success(ok)
+            }
+
+            "triggerCapture" -> {
+                val ok = when (activeDriverType) {
+                    "canon_usb" -> usbDriver.triggerCapture()
+                    else -> true
+                }
+                result.success(ok)
             }
 
             "disableCellularSync" -> {

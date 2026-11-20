@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:typed_data';
 
 import 'package:photoe_zi/features/camera/data/canon_native_camera_driver.dart';
 import 'package:photoe_zi/features/camera/data/mock_camera_driver.dart';
@@ -9,11 +10,17 @@ class CameraDriverManager implements BaseCameraDriver {
   BaseCameraDriver _activeDriver;
   StreamSubscription<CameraConnectionState>? _connSub;
   StreamSubscription<IncomingPhoto>? _photoSub;
+  StreamSubscription<LiveViewStatus>? _liveViewStatusSub;
+  StreamSubscription<Uint8List>? _liveViewFrameSub;
 
   final StreamController<CameraConnectionState> _connectionController =
       StreamController<CameraConnectionState>.broadcast();
   final StreamController<IncomingPhoto> _photoController =
       StreamController<IncomingPhoto>.broadcast();
+  final StreamController<LiveViewStatus> _liveViewStatusController =
+      StreamController<LiveViewStatus>.broadcast();
+  final StreamController<Uint8List> _liveViewFrameController =
+      StreamController<Uint8List>.broadcast();
 
   String _currentDriverId = 'mock';
 
@@ -28,6 +35,8 @@ class CameraDriverManager implements BaseCameraDriver {
   void _bindDriverStreams() {
     _connSub?.cancel();
     _photoSub?.cancel();
+    _liveViewStatusSub?.cancel();
+    _liveViewFrameSub?.cancel();
 
     _connSub = _activeDriver.connectionStateStream.listen((state) {
       if (!_connectionController.isClosed) {
@@ -38,6 +47,18 @@ class CameraDriverManager implements BaseCameraDriver {
     _photoSub = _activeDriver.onNewPhotoStream.listen((photo) {
       if (!_photoController.isClosed) {
         _photoController.add(photo);
+      }
+    });
+
+    _liveViewStatusSub = _activeDriver.liveViewStatusStream.listen((status) {
+      if (!_liveViewStatusController.isClosed) {
+        _liveViewStatusController.add(status);
+      }
+    });
+
+    _liveViewFrameSub = _activeDriver.liveViewFrameStream.listen((frame) {
+      if (!_liveViewFrameController.isClosed) {
+        _liveViewFrameController.add(frame);
       }
     });
   }
@@ -121,6 +142,34 @@ class CameraDriverManager implements BaseCameraDriver {
   }
 
   @override
+  Stream<LiveViewStatus> get liveViewStatusStream =>
+      _liveViewStatusController.stream;
+
+  @override
+  Stream<Uint8List> get liveViewFrameStream => _liveViewFrameController.stream;
+
+  @override
+  bool get isLiveViewActive => _activeDriver.isLiveViewActive;
+
+  @override
+  bool get isLiveViewReconnecting => _activeDriver.isLiveViewReconnecting;
+
+  @override
+  Future<bool> startLiveView() async {
+    return await _activeDriver.startLiveView();
+  }
+
+  @override
+  Future<bool> stopLiveView() async {
+    return await _activeDriver.stopLiveView();
+  }
+
+  @override
+  Future<bool> triggerCapture() async {
+    return await _activeDriver.triggerCapture();
+  }
+
+  @override
   Future<int> rescanCameraPhotos() async {
     return await _activeDriver.rescanCameraPhotos();
   }
@@ -128,8 +177,12 @@ class CameraDriverManager implements BaseCameraDriver {
   void dispose() {
     _connSub?.cancel();
     _photoSub?.cancel();
+    _liveViewStatusSub?.cancel();
+    _liveViewFrameSub?.cancel();
     _connectionController.close();
     _photoController.close();
+    _liveViewStatusController.close();
+    _liveViewFrameController.close();
     if (_activeDriver is MockCameraDriver) {
       (_activeDriver as MockCameraDriver).dispose();
     } else if (_activeDriver is CanonNativeCameraDriver) {

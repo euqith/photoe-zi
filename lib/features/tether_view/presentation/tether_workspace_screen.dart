@@ -121,6 +121,10 @@ class _TetherWorkspaceScreenState
                     sessionState,
                   ),
                   onResetCamera: () => _handleResetCamera(context, controller),
+                  isLiveViewActive: sessionState.isLiveViewActive,
+                  isLiveViewReconnecting: sessionState.isLiveViewReconnecting,
+                  onToggleLiveView: controller.toggleLiveView,
+                  onTriggerCapture: controller.triggerShutterCapture,
                   onShowQrModal: () async {
                     final shareUrl =
                         await controller.prepareShareableSessionLink();
@@ -239,6 +243,9 @@ class _TetherWorkspaceScreenState
                   lockLatest: sessionState.lockLatest,
                   isViewingOlderPhoto: isViewingOlderPhoto,
                   isZenMode: sessionState.isZenMode,
+                  isLiveViewActive: sessionState.isLiveViewActive,
+                  isLiveViewReconnecting: sessionState.isLiveViewReconnecting,
+                  liveViewFrame: sessionState.liveViewFrame,
                   onToggleFavorite: () {
                     if (activePhoto != null) {
                       controller.toggleFavorite(activePhoto);
@@ -384,6 +391,9 @@ class _TetherWorkspaceScreenState
                 lockLatest: sessionState.lockLatest,
                 isViewingOlderPhoto: isViewingOlderPhoto,
                 isZenMode: sessionState.isZenMode,
+                isLiveViewActive: sessionState.isLiveViewActive,
+                isLiveViewReconnecting: sessionState.isLiveViewReconnecting,
+                liveViewFrame: sessionState.liveViewFrame,
                 onToggleFavorite: () {
                   if (activePhoto != null) {
                     controller.toggleFavorite(activePhoto);

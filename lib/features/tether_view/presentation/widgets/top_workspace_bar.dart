@@ -22,6 +22,10 @@ class TopWorkspaceBar extends StatelessWidget {
   final VoidCallback onShowQrModal;
   final VoidCallback? onOpenDriveSettings;
   final VoidCallback? onResetCamera;
+  final bool isLiveViewActive;
+  final bool isLiveViewReconnecting;
+  final VoidCallback? onToggleLiveView;
+  final VoidCallback? onTriggerCapture;
 
   const TopWorkspaceBar({
     super.key,
@@ -44,6 +48,10 @@ class TopWorkspaceBar extends StatelessWidget {
     required this.onShowQrModal,
     this.onOpenDriveSettings,
     this.onResetCamera,
+    this.isLiveViewActive = false,
+    this.isLiveViewReconnecting = false,
+    this.onToggleLiveView,
+    this.onTriggerCapture,
   });
 
   @override
@@ -264,6 +272,99 @@ class TopWorkspaceBar extends StatelessWidget {
                                   fontSize: 11,
                                   fontWeight: FontWeight.w600,
                                   color: StudioColors.accentAmber,
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ),
+                    ],
+
+                    // Live View EVF Toggle
+                    if (onToggleLiveView != null && isConnected) ...[
+                      const SizedBox(width: 6),
+                      InkWell(
+                        key: const Key('btn_toggle_live_view'),
+                        onTap: onToggleLiveView,
+                        borderRadius: BorderRadius.circular(4),
+                        child: Container(
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 8,
+                            vertical: 4,
+                          ),
+                          decoration: BoxDecoration(
+                            color: isLiveViewActive
+                                ? Colors.red.withValues(alpha: 0.18)
+                                : StudioColors.panelElevated,
+                            borderRadius: BorderRadius.circular(4),
+                            border: Border.all(
+                              color: isLiveViewActive
+                                  ? Colors.red
+                                  : StudioColors.panelBorder,
+                            ),
+                          ),
+                          child: Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              Icon(
+                                Icons.videocam_rounded,
+                                size: 13,
+                                color: isLiveViewActive
+                                    ? Colors.red
+                                    : StudioColors.textSecondary,
+                              ),
+                              const SizedBox(width: 4),
+                              Text(
+                                isLiveViewReconnecting
+                                    ? 'EVF Buffer...'
+                                    : (isLiveViewActive
+                                        ? 'Live View: ON'
+                                        : 'Live View'),
+                                style: TextStyle(
+                                  fontSize: 11,
+                                  fontWeight: FontWeight.w600,
+                                  color: isLiveViewActive
+                                      ? Colors.red
+                                      : StudioColors.textSecondary,
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ),
+                    ],
+
+                    // Remote Shutter Capture Button
+                    if (onTriggerCapture != null && isConnected) ...[
+                      const SizedBox(width: 6),
+                      InkWell(
+                        key: const Key('btn_trigger_capture'),
+                        onTap: onTriggerCapture,
+                        borderRadius: BorderRadius.circular(4),
+                        child: Container(
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 9,
+                            vertical: 4,
+                          ),
+                          decoration: BoxDecoration(
+                            color: StudioColors.accentAmber,
+                            borderRadius: BorderRadius.circular(4),
+                          ),
+                          child: const Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              Icon(
+                                Icons.camera,
+                                size: 13,
+                                color: Colors.black,
+                              ),
+                              SizedBox(width: 4),
+                              Text(
+                                'Capture',
+                                style: TextStyle(
+                                  fontSize: 11,
+                                  fontWeight: FontWeight.bold,
+                                  color: Colors.black,
                                 ),
                               ),
                             ],

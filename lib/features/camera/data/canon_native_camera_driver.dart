@@ -19,9 +19,17 @@ class CanonNativeCameraDriver implements BaseCameraDriver {
       StreamController<CameraConnectionState>.broadcast();
   final StreamController<IncomingPhoto> _photoController =
       StreamController<IncomingPhoto>.broadcast();
+  final StreamController<LiveViewStatus> _liveViewStatusController =
+      StreamController<LiveViewStatus>.broadcast();
+  final StreamController<Uint8List> _liveViewFrameController =
+      StreamController<Uint8List>.broadcast();
 
   StreamSubscription<dynamic>? _eventSubscription;
   CameraConnectionState _state = CameraConnectionState.disconnected;
+
+  bool _isLiveViewActive = false;
+  bool _wasInLiveView = false;
+  bool _isLiveViewReconnecting = false;
 
   CanonNativeCameraDriver({
     required this.driverId,
@@ -60,6 +68,22 @@ class CanonNativeCameraDriver implements BaseCameraDriver {
             }
           } else if (type == 'photoAdded' && data is Map) {
             _handleIncomingNativePhoto(data);
+          } else if (type == 'liveViewStatus') {
+            final statusStr = (data is Map ? data['status'] : data)?.toString();
+            final newStatus = switch (statusStr) {
+              'active' => LiveViewStatus.active,
+              'reconnecting' => LiveViewStatus.reconnecting,
+              _ => LiveViewStatus.inactive,
+            };
+            _isLiveViewActive = newStatus == LiveViewStatus.active;
+            _isLiveViewReconnecting = newStatus == LiveViewStatus.reconnecting;
+            if (!_liveViewStatusController.isClosed) {
+              _liveViewStatusController.add(newStatus);
+            }
+          } else if (type == 'liveViewFrame' && data is Uint8List) {
+            if (!_liveViewFrameController.isClosed) {
+              _liveViewFrameController.add(data);
+            }
           }
         }
       },
@@ -109,6 +133,14 @@ class CanonNativeCameraDriver implements BaseCameraDriver {
 
       if (!_photoController.isClosed) {
         _photoController.add(photo);
+      }
+
+      // Check if camera was in Live View before capture: auto-restart EVF after buffer delay
+      if (_wasInLiveView) {
+        _wasInLiveView = false;
+        Future.delayed(const Duration(milliseconds: 400), () async {
+          await startLiveView();
+        });
       }
     } catch (_) {}
   }
@@ -193,6 +225,75 @@ class CanonNativeCameraDriver implements BaseCameraDriver {
   }
 
   @override
+  Stream<LiveViewStatus> get liveViewStatusStream =>
+      _liveViewStatusController.stream;
+
+  @override
+  Stream<Uint8List> get liveViewFrameStream => _liveViewFrameController.stream;
+
+  @override
+  bool get isLiveViewActive => _isLiveViewActive;
+
+  @override
+  bool get isLiveViewReconnecting => _isLiveViewReconnecting;
+
+  @override
+  Future<bool> startLiveView() async {
+    try {
+      final ok =
+          await _methodChannel.invokeMethod<bool>('startLiveView') ?? false;
+      if (ok) {
+        _isLiveViewActive = true;
+        _wasInLiveView = false;
+        _isLiveViewReconnecting = false;
+        if (!_liveViewStatusController.isClosed) {
+          _liveViewStatusController.add(LiveViewStatus.active);
+        }
+      }
+      return ok;
+    } catch (_) {
+      return false;
+    }
+  }
+
+  @override
+  Future<bool> stopLiveView() async {
+    try {
+      final ok =
+          await _methodChannel.invokeMethod<bool>('stopLiveView') ?? false;
+      _isLiveViewActive = false;
+      _wasInLiveView = false;
+      _isLiveViewReconnecting = false;
+      if (!_liveViewStatusController.isClosed) {
+        _liveViewStatusController.add(LiveViewStatus.inactive);
+      }
+      return ok;
+    } catch (_) {
+      return false;
+    }
+  }
+
+  @override
+  Future<bool> triggerCapture() async {
+    // 1. Record whether camera was in Live View mode prior to capture command
+    _wasInLiveView = _isLiveViewActive;
+    if (_wasInLiveView) {
+      _isLiveViewReconnecting = true;
+      if (!_liveViewStatusController.isClosed) {
+        _liveViewStatusController.add(LiveViewStatus.reconnecting);
+      }
+    }
+
+    try {
+      final ok =
+          await _methodChannel.invokeMethod<bool>('triggerCapture') ?? false;
+      return ok;
+    } catch (_) {
+      return false;
+    }
+  }
+
+  @override
   Future<int> rescanCameraPhotos() async {
     try {
       final count =
@@ -244,5 +345,7 @@ class CanonNativeCameraDriver implements BaseCameraDriver {
     _eventSubscription?.cancel();
     _connectionController.close();
     _photoController.close();
+    _liveViewStatusController.close();
+    _liveViewFrameController.close();
   }
 }

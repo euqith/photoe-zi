@@ -54,6 +54,9 @@ class TetherSessionState {
   final ui.Image? activeLutTexture;
   final Map<String, Uint8List> inMemoryPreviews;
   final Map<String, String> bakedFilePaths;
+  final bool isLiveViewActive;
+  final bool isLiveViewReconnecting;
+  final Uint8List? liveViewFrame;
 
   const TetherSessionState({
     this.activeSessionId = 'session_studio_a',
@@ -87,6 +90,9 @@ class TetherSessionState {
     this.activeLutTexture,
     this.inMemoryPreviews = const {},
     this.bakedFilePaths = const {},
+    this.isLiveViewActive = false,
+    this.isLiveViewReconnecting = false,
+    this.liveViewFrame,
   });
 
   TetherSessionState copyWith({
@@ -124,6 +130,10 @@ class TetherSessionState {
     ui.Image? activeLutTexture,
     Map<String, Uint8List>? inMemoryPreviews,
     Map<String, String>? bakedFilePaths,
+    bool? isLiveViewActive,
+    bool? isLiveViewReconnecting,
+    Uint8List? liveViewFrame,
+    bool clearLiveViewFrame = false,
   }) {
     return TetherSessionState(
       activeSessionId: activeSessionId ?? this.activeSessionId,
@@ -165,6 +175,12 @@ class TetherSessionState {
           clearActiveLut ? null : (activeLutTexture ?? this.activeLutTexture),
       inMemoryPreviews: inMemoryPreviews ?? this.inMemoryPreviews,
       bakedFilePaths: bakedFilePaths ?? this.bakedFilePaths,
+      isLiveViewActive: isLiveViewActive ?? this.isLiveViewActive,
+      isLiveViewReconnecting:
+          isLiveViewReconnecting ?? this.isLiveViewReconnecting,
+      liveViewFrame: clearLiveViewFrame
+          ? null
+          : (liveViewFrame ?? this.liveViewFrame),
     );
   }
 }
@@ -220,6 +236,8 @@ class TetherWorkspaceController extends StateNotifier<TetherSessionState> {
   StreamSubscription<IncomingPhoto>? _photoSub;
   StreamSubscription<Map<String, double>>? _progressSub;
   StreamSubscription<String?>? _errorSub;
+  StreamSubscription<LiveViewStatus>? _liveViewStatusSub;
+  StreamSubscription<Uint8List>? _liveViewFrameSub;
 
   TetherWorkspaceController({
     required this.db,
@@ -293,6 +311,21 @@ class TetherWorkspaceController extends StateNotifier<TetherSessionState> {
           googleAuthError: errMsg,
           clearGoogleAuthError: errMsg == null,
         );
+      }
+    });
+
+    _liveViewStatusSub = cameraDriver.liveViewStatusStream.listen((status) {
+      if (mounted) {
+        state = state.copyWith(
+          isLiveViewActive: status == LiveViewStatus.active,
+          isLiveViewReconnecting: status == LiveViewStatus.reconnecting,
+        );
+      }
+    });
+
+    _liveViewFrameSub = cameraDriver.liveViewFrameStream.listen((frame) {
+      if (mounted) {
+        state = state.copyWith(liveViewFrame: frame);
       }
     });
   }
@@ -870,12 +903,43 @@ class TetherWorkspaceController extends StateNotifier<TetherSessionState> {
     );
   }
 
+  Future<void> toggleLiveView() async {
+    if (state.isLiveViewActive) {
+      await cameraDriver.stopLiveView();
+      if (mounted) {
+        state = state.copyWith(
+          isLiveViewActive: false,
+          isLiveViewReconnecting: false,
+          clearLiveViewFrame: true,
+        );
+      }
+    } else {
+      await cameraDriver.startLiveView();
+      if (mounted) {
+        state = state.copyWith(
+          isLiveViewActive: true,
+          isLiveViewReconnecting: false,
+        );
+      }
+    }
+  }
+
+  Future<void> triggerShutterCapture() async {
+    if (state.cameraState != CameraConnectionState.connected) {
+      await triggerManualMockCapture();
+      return;
+    }
+    await cameraDriver.triggerCapture();
+  }
+
   @override
   void dispose() {
     _connSub?.cancel();
     _photoSub?.cancel();
     _progressSub?.cancel();
     _errorSub?.cancel();
+    _liveViewStatusSub?.cancel();
+    _liveViewFrameSub?.cancel();
     super.dispose();
   }
 }

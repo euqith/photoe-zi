@@ -4,6 +4,7 @@ import 'dart:typed_data';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:photoe_zi/features/camera/data/camera_driver_manager.dart';
+import 'package:photoe_zi/features/camera/data/mock_camera_driver.dart';
 import 'package:photoe_zi/features/camera/domain/base_camera_driver.dart';
 import 'package:photoe_zi/features/camera/domain/camera_types.dart';
 import 'package:photoe_zi/features/camera/presentation/camera_connection_modal.dart';
@@ -192,6 +193,40 @@ void main() {
       expect(selectedDriver, 'fuji_wifi');
       expect(selectedIp, '192.168.0.1');
       expect(selectedPort, 55740);
+    });
+
+    test('Live View EVF Auto-Restart: preserves wasInLiveView and restarts after buffer delay', () async {
+      final mockDriver = MockCameraDriver();
+      await mockDriver.connect();
+
+      expect(mockDriver.isLiveViewActive, false);
+      expect(mockDriver.isLiveViewReconnecting, false);
+
+      // 1. Start Live View
+      await mockDriver.startLiveView();
+      expect(mockDriver.isLiveViewActive, true);
+
+      // Track status transitions
+      final statuses = <LiveViewStatus>[];
+      final sub = mockDriver.liveViewStatusStream.listen(statuses.add);
+
+      // 2. Trigger capture while in Live View
+      final captureFuture = mockDriver.triggerCapture();
+      expect(mockDriver.isLiveViewReconnecting, true);
+
+      await captureFuture;
+
+      // 3. Wait for photo capture + 400ms buffer clearance delay
+      await Future<void>.delayed(const Duration(milliseconds: 650));
+
+      // 4. Live View should be automatically restarted!
+      expect(mockDriver.isLiveViewActive, true);
+      expect(mockDriver.isLiveViewReconnecting, false);
+      expect(statuses, contains(LiveViewStatus.reconnecting));
+      expect(statuses.last, LiveViewStatus.active);
+
+      await sub.cancel();
+      mockDriver.dispose();
     });
   });
 }

@@ -56,6 +56,13 @@ class CanonUsbPtpDriver(
         // PTP Event Codes
         private const val PTP_EC_ObjectAdded: Short = 0x4002
         private const val PTP_EC_CanonEvent: Short = 0xC101.toShort()
+
+        // PTP Capture & Canon Live View Opcodes
+        private const val PTP_OC_InitiateCapture: Short = 0x100E
+        private const val PTP_OC_Canon_InitiateCaptureInMemory: Short = 0x910F.toShort()
+        private const val PTP_OC_Canon_StartLiveView: Short = 0x9153.toShort()
+        private const val PTP_OC_Canon_EndLiveView: Short = 0x9154.toShort()
+        private const val PTP_DPC_Canon_EVFOutputDevice: Short = 0xD102.toShort()
     }
 
     private val usbManager = context.getSystemService(Context.USB_SERVICE) as UsbManager
@@ -71,6 +78,13 @@ class CanonUsbPtpDriver(
     private var isConnected = false
     private var eventLoopJob: Job? = null
     private val scope = CoroutineScope(Dispatchers.IO)
+
+    // Live View (EVF) & Capture State
+    private var isLiveViewActive: Boolean = false
+    private var wasInLiveView: Boolean = false
+    private var isLiveViewReconnecting: Boolean = false
+    var onLiveViewStatusChange: ((String) -> Unit)? = null
+    var onLiveViewFrame: ((ByteArray) -> Unit)? = null
 
     private val permissionReceiver = object : BroadcastReceiver() {
         override fun onReceive(context: Context?, intent: Intent?) {
@@ -324,6 +338,15 @@ class CanonUsbPtpDriver(
             withContext(Dispatchers.Main) {
                 onNewPhoto(photoPayload)
             }
+
+            // Check if camera was in Live View before capture: auto-restart EVF after buffer delay
+            if (wasInLiveView) {
+                wasInLiveView = false
+                scope.launch {
+                    delay(400) // 300ms - 500ms delay to ensure camera buffer is ready
+                    startLiveView()
+                }
+            }
         } catch (e: Exception) {
             Log.e(TAG, "Error handling Canon ObjectAdded: ${e.message}")
         }
@@ -415,6 +438,40 @@ class CanonUsbPtpDriver(
             }
         }
         throw Exception("Failed downloading full resolution object $objectHandle from Canon camera")
+    }
+
+    fun startLiveView(): Boolean {
+        if (!isConnected) return false
+        isLiveViewActive = true
+        wasInLiveView = false
+        isLiveViewReconnecting = false
+        sendPtpCommand(PTP_OC_Canon_StartLiveView)
+        onLiveViewStatusChange?.invoke("active")
+        return true
+    }
+
+    fun stopLiveView(): Boolean {
+        isLiveViewActive = false
+        wasInLiveView = false
+        isLiveViewReconnecting = false
+        sendPtpCommand(PTP_OC_Canon_EndLiveView)
+        onLiveViewStatusChange?.invoke("inactive")
+        return true
+    }
+
+    fun triggerCapture(): Boolean {
+        if (!isConnected) return false
+        // 1. Record whether camera was in Live View mode prior to capture command
+        wasInLiveView = isLiveViewActive
+        if (wasInLiveView) {
+            isLiveViewReconnecting = true
+            onLiveViewStatusChange?.invoke("reconnecting")
+        }
+        val resp = sendPtpCommand(PTP_OC_InitiateCapture, 0, 0)
+        if (resp == -1) {
+            sendPtpCommand(PTP_OC_Canon_InitiateCaptureInMemory)
+        }
+        return true
     }
 
     fun disconnect() {

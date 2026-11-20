@@ -20,6 +20,9 @@ class MainPhotoCanvas extends StatefulWidget {
   final bool lockLatest;
   final bool isViewingOlderPhoto;
   final bool isZenMode;
+  final bool isLiveViewActive;
+  final bool isLiveViewReconnecting;
+  final Uint8List? liveViewFrame;
   final VoidCallback onToggleFavorite;
   final VoidCallback onToggleReject;
   final VoidCallback onJumpToLatest;
@@ -38,6 +41,9 @@ class MainPhotoCanvas extends StatefulWidget {
     required this.lockLatest,
     required this.isViewingOlderPhoto,
     required this.isZenMode,
+    this.isLiveViewActive = false,
+    this.isLiveViewReconnecting = false,
+    this.liveViewFrame,
     required this.onToggleFavorite,
     required this.onToggleReject,
     required this.onJumpToLatest,
@@ -102,6 +108,14 @@ class _MainPhotoCanvasState extends State<MainPhotoCanvas> {
   }
 
   Widget _buildImageContent(Photo photo) {
+    if (widget.isLiveViewActive && widget.liveViewFrame != null) {
+      return Image.memory(
+        widget.liveViewFrame!,
+        fit: BoxFit.contain,
+        gaplessPlayback: true,
+      );
+    }
+
     final bytes = _resolveDisplayBytes(photo);
     if (bytes == null) {
       return const Center(
@@ -133,6 +147,109 @@ class _MainPhotoCanvasState extends State<MainPhotoCanvas> {
   Widget build(BuildContext context) {
     final photo = widget.activePhoto;
     if (photo == null) {
+      if (widget.isLiveViewActive || widget.isLiveViewReconnecting) {
+        return Container(
+          color: StudioColors.canvasBackground,
+          child: Stack(
+            children: [
+              if (widget.isLiveViewActive && widget.liveViewFrame != null)
+                Positioned.fill(
+                  child: Image.memory(
+                    widget.liveViewFrame!,
+                    fit: BoxFit.contain,
+                    gaplessPlayback: true,
+                  ),
+                ),
+              if (widget.isLiveViewActive)
+                Positioned(
+                  top: 12,
+                  left: 12,
+                  child: Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                    decoration: BoxDecoration(
+                      color: Colors.red.withValues(alpha: 0.85),
+                      borderRadius: BorderRadius.circular(4),
+                      boxShadow: [
+                        BoxShadow(
+                          color: Colors.red.withValues(alpha: 0.35),
+                          blurRadius: 6,
+                        ),
+                      ],
+                    ),
+                    child: const Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Icon(Icons.circle, size: 7, color: Colors.white),
+                        SizedBox(width: 5),
+                        Text(
+                          'LIVE VIEW (EVF)',
+                          style: TextStyle(
+                            color: Colors.white,
+                            fontSize: 10,
+                            fontWeight: FontWeight.bold,
+                            letterSpacing: 0.6,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+              if (widget.isLiveViewReconnecting)
+                Positioned.fill(
+                  child: Container(
+                    color: Colors.black.withValues(alpha: 0.72),
+                    child: Center(
+                      child: Container(
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 20,
+                          vertical: 16,
+                        ),
+                        decoration: BoxDecoration(
+                          color: StudioColors.panelSurface,
+                          borderRadius: BorderRadius.circular(10),
+                          border: Border.all(color: StudioColors.panelBorder),
+                        ),
+                        child: const Column(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            SizedBox(
+                              width: 24,
+                              height: 24,
+                              child: CircularProgressIndicator(
+                                strokeWidth: 2.5,
+                                valueColor: AlwaysStoppedAnimation<Color>(
+                                  StudioColors.accentAmber,
+                                ),
+                              ),
+                            ),
+                            SizedBox(height: 12),
+                            Text(
+                              'Resuming Live View (EVF)...',
+                              style: TextStyle(
+                                color: StudioColors.textPrimary,
+                                fontSize: 12,
+                                fontWeight: FontWeight.w600,
+                              ),
+                            ),
+                            SizedBox(height: 4),
+                            Text(
+                              'Clearing camera buffer · Auto-restarting EVF',
+                              style: TextStyle(
+                                color: StudioColors.textMuted,
+                                fontSize: 10,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ),
+                  ),
+                ),
+            ],
+          ),
+        );
+      }
+
       return Container(
         color: StudioColors.canvasBackground,
         alignment: Alignment.center,
@@ -356,6 +473,101 @@ class _MainPhotoCanvasState extends State<MainPhotoCanvas> {
                       ),
                     ),
                   ],
+                ),
+              ),
+            ),
+
+          // Live View Active Badge
+          if (widget.isLiveViewActive)
+            Positioned(
+              top: 12,
+              left: 12,
+              child: Container(
+                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                decoration: BoxDecoration(
+                  color: Colors.red.withValues(alpha: 0.85),
+                  borderRadius: BorderRadius.circular(4),
+                  boxShadow: [
+                    BoxShadow(
+                      color: Colors.red.withValues(alpha: 0.35),
+                      blurRadius: 6,
+                    ),
+                  ],
+                ),
+                child: const Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Icon(Icons.circle, size: 7, color: Colors.white),
+                    SizedBox(width: 5),
+                    Text(
+                      'LIVE VIEW (EVF)',
+                      style: TextStyle(
+                        color: Colors.white,
+                        fontSize: 10,
+                        fontWeight: FontWeight.bold,
+                        letterSpacing: 0.6,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+
+          // Live View Reconnecting Overlay (Smooth camera buffer clear indicator)
+          if (widget.isLiveViewReconnecting)
+            Positioned.fill(
+              child: Container(
+                color: Colors.black.withValues(alpha: 0.72),
+                child: Center(
+                  child: Container(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 20,
+                      vertical: 16,
+                    ),
+                    decoration: BoxDecoration(
+                      color: StudioColors.panelSurface,
+                      borderRadius: BorderRadius.circular(10),
+                      border: Border.all(color: StudioColors.panelBorder),
+                      boxShadow: [
+                        BoxShadow(
+                          color: Colors.black.withValues(alpha: 0.5),
+                          blurRadius: 16,
+                        ),
+                      ],
+                    ),
+                    child: const Column(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        SizedBox(
+                          width: 24,
+                          height: 24,
+                          child: CircularProgressIndicator(
+                            strokeWidth: 2.5,
+                            valueColor: AlwaysStoppedAnimation<Color>(
+                              StudioColors.accentAmber,
+                            ),
+                          ),
+                        ),
+                        SizedBox(height: 12),
+                        Text(
+                          'Resuming Live View (EVF)...',
+                          style: TextStyle(
+                            color: StudioColors.textPrimary,
+                            fontSize: 12,
+                            fontWeight: FontWeight.w600,
+                          ),
+                        ),
+                        SizedBox(height: 4),
+                        Text(
+                          'Clearing camera buffer · Auto-restarting EVF',
+                          style: TextStyle(
+                            color: StudioColors.textMuted,
+                            fontSize: 10,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
                 ),
               ),
             ),

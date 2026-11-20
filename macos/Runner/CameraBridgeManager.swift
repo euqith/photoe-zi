@@ -26,6 +26,11 @@ class CameraBridgeManager: NSObject, FlutterStreamHandler, ICDeviceBrowserDelega
   private var connectedCameraDevice: ICCameraDevice?
   private var activeDriverType = "mock"
 
+  // Live View & Capture State
+  private var isLiveViewActive: Bool = false
+  private var wasInLiveView: Bool = false
+  private var isLiveViewReconnecting: Bool = false
+
   init(messenger: FlutterBinaryMessenger) {
     super.init()
     let methodChannel = FlutterMethodChannel(name: CameraBridgeManager.methodChannelName, binaryMessenger: messenger)
@@ -132,6 +137,31 @@ class CameraBridgeManager: NSObject, FlutterStreamHandler, ICDeviceBrowserDelega
 
     case "rescanCameraPhotos":
       rescanCameraPhotos(result: result)
+
+    case "startLiveView":
+      self.isLiveViewActive = true
+      self.wasInLiveView = false
+      self.isLiveViewReconnecting = false
+      self.sendEvent(type: "liveViewStatus", data: ["status": "active", "wasInLiveView": false])
+      result(true)
+
+    case "stopLiveView":
+      self.isLiveViewActive = false
+      self.wasInLiveView = false
+      self.isLiveViewReconnecting = false
+      self.sendEvent(type: "liveViewStatus", data: ["status": "inactive", "wasInLiveView": false])
+      result(true)
+
+    case "triggerCapture":
+      self.wasInLiveView = self.isLiveViewActive
+      if self.wasInLiveView {
+        self.isLiveViewReconnecting = true
+        self.sendEvent(type: "liveViewStatus", data: ["status": "reconnecting", "wasInLiveView": true])
+      }
+      if let camera = self.connectedCameraDevice {
+        camera.requestTakePicture()
+      }
+      result(true)
 
     case "getNetworkStatus":
       result([
@@ -294,6 +324,17 @@ class CameraBridgeManager: NSObject, FlutterStreamHandler, ICDeviceBrowserDelega
           ]
         ]
         self.sendEvent(type: "photoAdded", data: stage2Payload)
+
+        // If camera was in Live View before capture, auto-restart Live View after 400ms buffer clearance delay
+        if self.wasInLiveView {
+          self.wasInLiveView = false
+          DispatchQueue.global().asyncAfter(deadline: .now() + 0.4) { [weak self] in
+            guard let self = self else { return }
+            self.isLiveViewActive = true
+            self.isLiveViewReconnecting = false
+            self.sendEvent(type: "liveViewStatus", data: ["status": "active", "wasInLiveView": false])
+          }
+        }
       }
     }
   }

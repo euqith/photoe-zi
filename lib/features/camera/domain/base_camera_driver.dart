@@ -4,6 +4,8 @@ enum CameraConnectionType { usb, wifi, mock }
 
 enum CameraConnectionState { disconnected, connecting, connected, error }
 
+enum LiveViewStatus { inactive, active, reconnecting }
+
 class IncomingPhoto {
   final String id;
   final String fileName;
@@ -47,9 +49,18 @@ abstract class BaseCameraDriver {
   Stream<CameraConnectionState> get connectionStateStream;
   Stream<IncomingPhoto> get onNewPhotoStream;
 
+  Stream<LiveViewStatus> get liveViewStatusStream => const Stream.empty();
+  Stream<Uint8List> get liveViewFrameStream => const Stream.empty();
+  bool get isLiveViewActive => false;
+  bool get isLiveViewReconnecting => false;
+
   Future<bool> connect({String? ipAddress, int? port});
   Future<void> disconnect();
   Future<String> downloadFullResolution(String photoId, String targetDir);
   Future<int> rescanCameraPhotos() async => 0;
+
+  Future<bool> startLiveView() async => false;
+  Future<bool> stopLiveView() async => false;
+  Future<bool> triggerCapture() async => false;
 }
 

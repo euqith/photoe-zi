@@ -105,6 +105,10 @@ class MockCameraDriver implements BaseCameraDriver {
       StreamController<CameraConnectionState>.broadcast();
   final StreamController<IncomingPhoto> _photoController =
       StreamController<IncomingPhoto>.broadcast();
+  final StreamController<LiveViewStatus> _liveViewStatusController =
+      StreamController<LiveViewStatus>.broadcast();
+  final StreamController<Uint8List> _liveViewFrameController =
+      StreamController<Uint8List>.broadcast();
 
   CameraConnectionState _state = CameraConnectionState.disconnected;
   Timer? _captureTimer;
@@ -113,6 +117,10 @@ class MockCameraDriver implements BaseCameraDriver {
   final Map<String, int> _photoShotIndices = {};
   final Map<int, Uint8List> _previewCache = {};
   final Map<int, Uint8List> _fullResCache = {};
+
+  bool _isLiveViewActive = false;
+  bool _wasInLiveView = false;
+  bool _isLiveViewReconnecting = false;
 
   MockCameraDriver({
     this.captureInterval = const Duration(seconds: 3),
@@ -313,6 +321,13 @@ class MockCameraDriver implements BaseCameraDriver {
       _photoController.add(stage1Photo);
     }
 
+    if (_wasInLiveView) {
+      _wasInLiveView = false;
+      Future.delayed(const Duration(milliseconds: 400), () async {
+        await startLiveView();
+      });
+    }
+
     // Stage 2: Pull full-resolution JPEG in background after 500ms and emit update
     Future<void>.delayed(fullResDelay, () async {
       if (_state != CameraConnectionState.connected ||
@@ -345,6 +360,59 @@ class MockCameraDriver implements BaseCameraDriver {
   }
 
   @override
+  Stream<LiveViewStatus> get liveViewStatusStream =>
+      _liveViewStatusController.stream;
+
+  @override
+  Stream<Uint8List> get liveViewFrameStream => _liveViewFrameController.stream;
+
+  @override
+  bool get isLiveViewActive => _isLiveViewActive;
+
+  @override
+  bool get isLiveViewReconnecting => _isLiveViewReconnecting;
+
+  @override
+  Future<bool> startLiveView() async {
+    _isLiveViewActive = true;
+    _wasInLiveView = false;
+    _isLiveViewReconnecting = false;
+    if (!_liveViewStatusController.isClosed) {
+      _liveViewStatusController.add(LiveViewStatus.active);
+    }
+    // Emit mock live frame from cache
+    final frame = await _getPreviewBytes(1);
+    if (!_liveViewFrameController.isClosed) {
+      _liveViewFrameController.add(frame);
+    }
+    return true;
+  }
+
+  @override
+  Future<bool> stopLiveView() async {
+    _isLiveViewActive = false;
+    _wasInLiveView = false;
+    _isLiveViewReconnecting = false;
+    if (!_liveViewStatusController.isClosed) {
+      _liveViewStatusController.add(LiveViewStatus.inactive);
+    }
+    return true;
+  }
+
+  @override
+  Future<bool> triggerCapture() async {
+    _wasInLiveView = _isLiveViewActive;
+    if (_wasInLiveView) {
+      _isLiveViewReconnecting = true;
+      if (!_liveViewStatusController.isClosed) {
+        _liveViewStatusController.add(LiveViewStatus.reconnecting);
+      }
+    }
+    await triggerManualShot();
+    return true;
+  }
+
+  @override
   Future<int> rescanCameraPhotos() async {
     return 0;
   }
@@ -353,6 +421,8 @@ class MockCameraDriver implements BaseCameraDriver {
     _captureTimer?.cancel();
     _connectionController.close();
     _photoController.close();
+    _liveViewStatusController.close();
+    _liveViewFrameController.close();
   }
 }
 
