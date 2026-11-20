@@ -28,5 +28,9 @@
 	<string>MainMenu</string>
 	<key>NSPrincipalClass</key>
 	<string>NSApplication</string>
+	<key>NSCameraUsageDescription</key>
+	<string>PhotoE-Zi accesses attached cameras via USB/PTP for instant tethered photography.</string>
+	<key>NSLocalNetworkUsageDescription</key>
+	<string>PhotoE-Zi connects to Canon and Fujifilm cameras over Wi-Fi (PTP/IP).</string>
 </dict>
 </plist>

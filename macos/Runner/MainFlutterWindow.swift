@@ -9,6 +9,7 @@ class MainFlutterWindow: NSWindow, NSWindowDelegate, WKNavigationDelegate, WKUID
   private var pendingOAuthResult: FlutterResult?
   private var redirectPrefix: String = "http://127.0.0.1"
   private var isOAuthCompleted: Bool = false
+  private var cameraBridgeManager: CameraBridgeManager?
 
   override func awakeFromNib() {
     let flutterViewController = FlutterViewController()
@@ -17,6 +18,8 @@ class MainFlutterWindow: NSWindow, NSWindowDelegate, WKNavigationDelegate, WKUID
     self.setFrame(windowFrame, display: true)
 
     RegisterGeneratedPlugins(registry: flutterViewController)
+
+    cameraBridgeManager = CameraBridgeManager(messenger: flutterViewController.engine.binaryMessenger)
 
     let oauthChannel = FlutterMethodChannel(
       name: "com.photoezi/oauth_popup",

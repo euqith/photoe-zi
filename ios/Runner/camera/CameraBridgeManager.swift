@@ -41,7 +41,7 @@ class CameraBridgeManager: NSObject, FlutterStreamHandler, ICDeviceBrowserDelega
   private func setupDeviceBrowser() {
     let browser = ICDeviceBrowser()
     browser.delegate = self
-    browser.browsedDeviceTypeMask = [.camera]
+    browser.browsedDeviceTypeMask = ICDeviceTypeMask(rawValue: ICDeviceType.camera.rawValue)!
     self.deviceBrowser = browser
     browser.start()
   }
@@ -178,6 +178,34 @@ class CameraBridgeManager: NSObject, FlutterStreamHandler, ICDeviceBrowserDelega
     }
   }
 
+  // MARK: - ICDeviceDelegate
+  func didRemove(_ device: ICDevice) {
+    if device == connectedCameraDevice {
+      connectedCameraDevice = nil
+      if activeDriverType == "canon_usb" {
+        disconnect()
+      }
+    }
+  }
+
+  func device(_ device: ICDevice, didOpenSessionWithError error: Error?) {
+    if error == nil {
+      self.isConnected = true
+      sendEvent(type: "connectionStateChanged", data: "connected")
+    } else {
+      sendEvent(type: "connectionStateChanged", data: "error")
+    }
+  }
+
+  func device(_ device: ICDevice, didCloseSessionWithError error: Error?) {
+    self.isConnected = false
+    sendEvent(type: "connectionStateChanged", data: "disconnected")
+  }
+
+  func deviceDidBecomeReady(_ device: ICDevice) {
+    self.sendEvent(type: "connectionStateChanged", data: "connected")
+  }
+
   // MARK: - ICCameraDeviceDelegate
   func cameraDevice(_ camera: ICCameraDevice, didAdd items: [ICCameraItem]) {
     for item in items {
@@ -185,7 +213,7 @@ class CameraBridgeManager: NSObject, FlutterStreamHandler, ICDeviceBrowserDelega
       let photoPayload: [String: Any] = [
         "id": "usb_\(file.name ?? "\(Date().timeIntervalSince1970)")",
         "fileName": file.name ?? "IMG_\(Int.random(in: 1000...9999)).JPG",
-        "previewBytes": nil,
+        "previewBytes": NSNull(),
         "capturedAt": Int(file.creationDate?.timeIntervalSince1970 ?? Date().timeIntervalSince1970) * 1000,
         "exif": [
           "cameraModel": camera.name ?? "Canon EOS (USB)",
@@ -199,9 +227,25 @@ class CameraBridgeManager: NSObject, FlutterStreamHandler, ICDeviceBrowserDelega
     }
   }
 
-  func deviceDidBecomeReady(_ device: ICDevice) {
+  func cameraDevice(_ camera: ICCameraDevice, didRemove items: [ICCameraItem]) {}
+
+  func cameraDevice(_ camera: ICCameraDevice, didReceiveThumbnail thumbnail: CGImage?, for item: ICCameraItem, error: Error?) {}
+
+  func cameraDevice(_ camera: ICCameraDevice, didReceiveMetadata metadata: [AnyHashable : Any]?, for item: ICCameraItem, error: Error?) {}
+
+  func cameraDevice(_ camera: ICCameraDevice, didRenameItems items: [ICCameraItem]) {}
+
+  func cameraDeviceDidChangeCapability(_ camera: ICCameraDevice) {}
+
+  func cameraDevice(_ camera: ICCameraDevice, didReceivePTPEvent eventData: Data) {}
+
+  func deviceDidBecomeReady(withCompleteContentCatalog device: ICCameraDevice) {
     self.sendEvent(type: "connectionStateChanged", data: "connected")
   }
+
+  func cameraDeviceDidRemoveAccessRestriction(_ device: ICDevice) {}
+
+  func cameraDeviceDidEnableAccessRestriction(_ device: ICDevice) {}
 
   // MARK: - Wi-Fi PTP/IP Connection
   private func connectPtpIp(host: String, port: UInt16, completion: @escaping FlutterResult) {
@@ -242,7 +286,7 @@ class CameraBridgeManager: NSObject, FlutterStreamHandler, ICDeviceBrowserDelega
         let photoPayload: [String: Any] = [
           "id": "wifi_\(Date().timeIntervalSince1970)",
           "fileName": self.activeDriverType == "fuji_wifi" ? "DSCF_\(Int.random(in: 1000...9999)).RAF" : "IMG_\(Int.random(in: 1000...9999)).JPG",
-          "previewBytes": nil,
+          "previewBytes": NSNull(),
           "capturedAt": Int(Date().timeIntervalSince1970 * 1000),
           "exif": [
             "cameraModel": self.activeDriverType == "fuji_wifi" ? "Fujifilm X-T10 (iOS Wi-Fi)" : "Canon EOS (iOS Wi-Fi)",
