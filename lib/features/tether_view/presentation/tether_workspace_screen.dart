@@ -9,6 +9,7 @@ import 'package:photoe_zi/core/utils/exif_and_histogram_utils.dart';
 import 'package:photoe_zi/features/camera/presentation/camera_connection_modal.dart';
 import 'package:photoe_zi/features/cloud_sync/data/google_drive_cloud_sync_service.dart';
 import 'package:photoe_zi/features/cloud_sync/presentation/drive_sync_panel.dart';
+import 'package:photoe_zi/features/sync/data/dual_network_service.dart';
 import 'package:photoe_zi/features/tether_view/presentation/tether_workspace_controller.dart';
 import 'package:photoe_zi/features/tether_view/presentation/widgets/exif_metadata_panel.dart';
 import 'package:photoe_zi/features/tether_view/presentation/widgets/filmstrip_bar.dart';
@@ -79,6 +80,10 @@ class _TetherWorkspaceScreenState
             uploadStatusMap[p.id] == 'uploading')
         .length;
 
+    final dualNetworkAsync = ref.watch(dualNetworkStatusProvider);
+    final dualNetworkStatus =
+        dualNetworkAsync.valueOrNull ?? const DualNetworkStatus();
+
     return Scaffold(
       backgroundColor: StudioColors.canvasBackground,
       body: SafeArea(
@@ -145,6 +150,14 @@ class _TetherWorkspaceScreenState
                   },
                 ),
 
+                // Smart Dual-Network Banner (Issue #6.2)
+                _buildDualNetworkBanner(
+                  context,
+                  dualNetworkStatus,
+                  queuedCount,
+                  sessionState.cameraDriverName,
+                ),
+
                 // Main Content Area
                 Expanded(
                   child: isLandscapeOrTablet
@@ -183,6 +196,83 @@ class _TetherWorkspaceScreenState
         ),
       ),
     );
+  }
+
+  Widget _buildDualNetworkBanner(
+    BuildContext context,
+    DualNetworkStatus dualNetworkStatus,
+    int queuedCount,
+    String cameraDriverName,
+  ) {
+    final isWifiCamera = cameraDriverName.toLowerCase().contains('wi-fi') ||
+        cameraDriverName.toLowerCase().contains('wifi') ||
+        dualNetworkStatus.isWifiActive;
+
+    if (!isWifiCamera) return const SizedBox.shrink();
+
+    if (dualNetworkStatus.isDualNetworkActive) {
+      return Container(
+        width: double.infinity,
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
+        color: StudioColors.statusSuccess.withValues(alpha: 0.12),
+        child: const Row(
+          children: [
+            Icon(Icons.check_circle_outline, size: 14, color: StudioColors.statusSuccess),
+            SizedBox(width: 8),
+            Text(
+              'Dual-Network Active: Camera Wi-Fi + Cellular Cloud Sync',
+              style: TextStyle(
+                fontSize: 11,
+                color: StudioColors.statusSuccess,
+                fontWeight: FontWeight.w500,
+              ),
+            ),
+          ],
+        ),
+      );
+    }
+
+    if (!dualNetworkStatus.isCellularActive && queuedCount > 0) {
+      return Container(
+        width: double.infinity,
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
+        color: StudioColors.statusWarning.withValues(alpha: 0.15),
+        child: Row(
+          children: [
+            const Icon(Icons.wifi_tethering, size: 14, color: StudioColors.statusWarning),
+            const SizedBox(width: 8),
+            Expanded(
+              child: Text(
+                'Connected to Camera Wi-Fi — Drive Sync Paused ($queuedCount queued)',
+                style: const TextStyle(
+                  fontSize: 11,
+                  color: StudioColors.statusWarning,
+                  fontWeight: FontWeight.w500,
+                ),
+              ),
+            ),
+            InkWell(
+              onTap: () {
+                ref.read(dualNetworkServiceProvider).enableCellularSync();
+              },
+              child: const Padding(
+                padding: EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                child: Text(
+                  'Enable Cellular Sync',
+                  style: TextStyle(
+                    fontSize: 11,
+                    color: StudioColors.accentAmber,
+                    fontWeight: FontWeight.bold,
+                  ),
+                ),
+              ),
+            ),
+          ],
+        ),
+      );
+    }
+
+    return const SizedBox.shrink();
   }
 
   /// Desktop / Tablet Landscape Layout (Primary Pro Workspace)

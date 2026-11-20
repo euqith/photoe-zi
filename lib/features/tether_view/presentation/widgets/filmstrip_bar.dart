@@ -366,6 +366,7 @@ class _FilmstripBarState extends State<FilmstripBar> {
       imageThumb = Image.memory(
         previewBytes,
         fit: BoxFit.cover,
+        cacheWidth: 300,
         filterQuality: FilterQuality.medium,
         gaplessPlayback: true,
       );
@@ -374,6 +375,7 @@ class _FilmstripBarState extends State<FilmstripBar> {
       imageThumb = Image.file(
         File(photo.previewPath!),
         fit: BoxFit.cover,
+        cacheWidth: 300,
         filterQuality: FilterQuality.medium,
         gaplessPlayback: true,
       );
@@ -382,6 +384,7 @@ class _FilmstripBarState extends State<FilmstripBar> {
       imageThumb = Image.file(
         File(photo.fullResPath!),
         fit: BoxFit.cover,
+        cacheWidth: 300,
         filterQuality: FilterQuality.medium,
         gaplessPlayback: true,
       );

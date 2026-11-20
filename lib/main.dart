@@ -19,6 +19,8 @@ final appRouterProvider = Provider<GoRouter>((ref) {
 
 void main() {
   WidgetsFlutterBinding.ensureInitialized();
+  PaintingBinding.instance.imageCache.maximumSizeBytes = 150 << 20; // 150 MB max RAM cache
+  PaintingBinding.instance.imageCache.maximumSize = 200; // max 200 decoded image frames
   runApp(
     const ProviderScope(
       child: PhotoEZiApp(),
