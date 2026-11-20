@@ -33,6 +33,7 @@ class CanonNativeCameraDriver implements BaseCameraDriver {
   Timer? _reconnectTimeoutTimer;
 
   bool _intentionalDisconnect = false;
+  bool _wasPreviouslyConnected = false;
   Timer? _autoReconnectTimer;
   String? _lastIpAddress;
   int? _lastPort;
@@ -77,9 +78,11 @@ class CanonNativeCameraDriver implements BaseCameraDriver {
             if ((newState == CameraConnectionState.disconnected ||
                     newState == CameraConnectionState.error) &&
                 !_intentionalDisconnect &&
+                _wasPreviouslyConnected &&
                 _connectionType == CameraConnectionType.wifi) {
               _scheduleAutoReconnect();
             } else if (newState == CameraConnectionState.connected) {
+              _wasPreviouslyConnected = true;
               _autoReconnectTimer?.cancel();
             }
           } else if (type == 'photoAdded' && data is Map) {
@@ -180,6 +183,7 @@ class CanonNativeCameraDriver implements BaseCameraDriver {
   @override
   Future<bool> connect({String? ipAddress, int? port}) async {
     _intentionalDisconnect = false;
+    _wasPreviouslyConnected = false;
     _lastIpAddress = ipAddress;
     _lastPort = port;
     _autoReconnectTimer?.cancel();
@@ -217,6 +221,7 @@ class CanonNativeCameraDriver implements BaseCameraDriver {
   @override
   Future<void> disconnect() async {
     _intentionalDisconnect = true;
+    _wasPreviouslyConnected = false;
     _autoReconnectTimer?.cancel();
     try {
       await _methodChannel.invokeMethod('disconnectCamera');

@@ -397,24 +397,33 @@ class CameraBridgeManager: NSObject, FlutterStreamHandler, ICDeviceBrowserDelega
       }
     }
 
-    // 5-second handshake timeout
+    // 10-second handshake timeout
     let timeoutWorkItem = DispatchWorkItem { [weak self] in
       guard let self = self, !self.isConnected else { return }
+      NSLog("[PtpIp] Handshake timed out after 10s")
       self.disconnect()
       self.sendEvent(type: "connectionStateChanged", data: "error")
       finishConnect(false)
     }
     self.handshakeTimeoutWorkItem = timeoutWorkItem
-    DispatchQueue.main.asyncAfter(deadline: .now() + 5.0, execute: timeoutWorkItem)
+    DispatchQueue.main.asyncAfter(deadline: .now() + 10.0, execute: timeoutWorkItem)
 
     connection.stateUpdateHandler = { [weak self] state in
       guard let self = self else { return }
       switch state {
       case .ready:
+        NSLog("[PtpIp] TCP Socket ready to \(host):\(port). Initiating handshake...")
         // Step 1: TCP Socket opened successfully.
         // Step 2: Send InitCommandRequest immediately
         self.performPtpIpHandshake(connection: connection, finish: finishConnect)
-      case .failed, .cancelled:
+      case .failed(let err):
+        NSLog("[PtpIp] TCP Socket failed: \(err)")
+        self.handshakeTimeoutWorkItem?.cancel()
+        self.isConnected = false
+        self.sendEvent(type: "connectionStateChanged", data: "disconnected")
+        finishConnect(false)
+      case .cancelled:
+        NSLog("[PtpIp] TCP Socket cancelled")
         self.handshakeTimeoutWorkItem?.cancel()
         self.isConnected = false
         self.sendEvent(type: "connectionStateChanged", data: "disconnected")
@@ -492,26 +501,20 @@ class CameraBridgeManager: NSObject, FlutterStreamHandler, ICDeviceBrowserDelega
   }
 
   private func waitForInitCommandAck(connection: NWConnection, completion: @escaping (Bool) -> Void) {
-    connection.receive(minimumIncompleteLength: 8, maximumLength: 8) { (data, _, _, error) in
-      guard error == nil, let data = data, data.count == 8 else {
+    connection.receive(minimumIncompleteLength: 8, maximumLength: 65536) { (data, _, _, error) in
+      guard error == nil, let data = data, data.count >= 8 else {
+        NSLog("[PtpIp] Error or EOF waiting for InitCommandAck: \(String(describing: error)), count=\(data?.count ?? 0)")
         completion(false)
         return
       }
-      let ackLen = data.subdata(in: 0..<4).withUnsafeBytes { $0.load(as: UInt32.self) }
       let ackType = data.subdata(in: 4..<8).withUnsafeBytes { $0.load(as: UInt32.self) }
+      NSLog("[PtpIp] Received InitCommand response packet type: \(ackType), bytes: \(data.count)")
 
-      if ackType != 2 { // PTPIP_INIT_COMMAND_ACK = 0x00000002
-        completion(false)
-        return
-      }
-
-      let remaining = Int(ackLen) - 8
-      if remaining > 0 {
-        connection.receive(minimumIncompleteLength: remaining, maximumLength: remaining) { (_, _, _, error) in
-          completion(error == nil)
-        }
-      } else {
+      if ackType == 2 { // PTPIP_INIT_COMMAND_ACK = 0x00000002
         completion(true)
+      } else {
+        NSLog("[PtpIp] Unexpected Ack packet type: \(ackType)")
+        completion(false)
       }
     }
   }
