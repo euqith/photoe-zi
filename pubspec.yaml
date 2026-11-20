@@ -35,5 +35,6 @@ flutter:
   uses-material-design: true
   assets:
     - assets/luts/
+    - assets/config/
   shaders:
     - shaders/lut_3d.frag

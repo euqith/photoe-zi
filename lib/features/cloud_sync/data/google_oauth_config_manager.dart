@@ -1,6 +1,7 @@
 import 'dart:convert';
 import 'dart:io';
 
+import 'package:flutter/services.dart';
 import 'package:path/path.dart' as p;
 import 'package:path_provider/path_provider.dart';
 
@@ -50,9 +51,13 @@ class GoogleOAuthConfigManager {
   );
 
   final Future<Directory> Function()? configDirProvider;
+  final bool allowDefaultFallback;
   GoogleOAuthConfig? _cachedConfig;
 
-  GoogleOAuthConfigManager({this.configDirProvider});
+  GoogleOAuthConfigManager({
+    this.configDirProvider,
+    this.allowDefaultFallback = true,
+  });
 
   Future<File> _resolveConfigFile() async {
     Directory dir;
@@ -103,6 +108,23 @@ class GoogleOAuthConfigManager {
       return envConfig;
     }
 
+    // 3. Check bundled app asset config (assets/config/photoe_zi_default_oauth.json)
+    if (allowDefaultFallback) {
+      try {
+        final assetJsonStr = await rootBundle.loadString(
+          'assets/config/photoe_zi_default_oauth.json',
+        );
+        if (assetJsonStr.trim().isNotEmpty) {
+          final json = jsonDecode(assetJsonStr) as Map<String, dynamic>;
+          final assetConfig = GoogleOAuthConfig.fromJson(json);
+          if (assetConfig.isConfigured) {
+            _cachedConfig = assetConfig;
+            return assetConfig;
+          }
+        }
+      } catch (_) {}
+    }
+
     return const GoogleOAuthConfig();
   }
 
@@ -141,4 +163,3 @@ class GoogleOAuthConfigManager {
     } catch (_) {}
   }
 }
-

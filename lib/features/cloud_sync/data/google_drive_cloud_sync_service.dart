@@ -371,27 +371,16 @@ class GoogleDriveCloudSyncService implements CloudSyncService {
     }
   }
 
-  /// Opens a URL in the host OS browser (macOS `open`, Linux `xdg-open`, Windows `start`).
-  /// On macOS, if [asPopup] is true and Google Chrome is installed, opens Chrome in
-  /// standalone app mode (`--app=...`) to provide a dedicated, frameless login popup.
+  /// Opens a URL in the host OS default browser (macOS `open`, Linux `xdg-open`, Windows `start`).
+  /// Launches the user's active browser where their Google Account is already signed in.
   static Future<void> openSystemUrl(String url, {bool asPopup = false}) async {
     try {
       if (Platform.isMacOS) {
-        if (asPopup && Directory('/Applications/Google Chrome.app').existsSync()) {
-          final res = await Process.run('open', [
-            '-na',
-            '/Applications/Google Chrome.app',
-            '--args',
-            '--app=$url',
-            '--window-size=520,680',
-          ]);
-          if (res.exitCode == 0) return;
-        }
         await Process.run('open', [url]);
       } else if (Platform.isLinux) {
         await Process.run('xdg-open', [url]);
       } else if (Platform.isWindows) {
-        await Process.run('cmd', ['/c', 'start', url]);
+        await Process.run('cmd', ['/c', 'start', '', url]);
       }
     } catch (_) {}
   }

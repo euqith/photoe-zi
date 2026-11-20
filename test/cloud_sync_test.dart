@@ -372,6 +372,7 @@ void main() {
         () async {
       final configManager = GoogleOAuthConfigManager(
         configDirProvider: () async => tempDir,
+        allowDefaultFallback: false,
       );
 
       var config = await configManager.loadConfig();
@@ -398,6 +399,7 @@ void main() {
         () async {
       final configManager = GoogleOAuthConfigManager(
         configDirProvider: () async => tempDir,
+        allowDefaultFallback: false,
       );
       final service = GoogleDriveCloudSyncService(
         db: db,
@@ -413,6 +415,19 @@ void main() {
         contains('PhotoE-Zi Google OAuth 2.0 Client ID is not configured yet'),
       );
       expect(service.lastErrorMessage, isNot(contains('rclone')));
+    });
+
+    test(
+        'falls back to official PhotoE-Zi built-in OAuth client when no custom config exists',
+        () async {
+      final configManager = GoogleOAuthConfigManager(
+        configDirProvider: () async => tempDir,
+        allowDefaultFallback: true,
+      );
+      final config = await configManager.loadConfig();
+      expect(config.isConfigured, isTrue);
+      expect(config.clientId, contains('apps.googleusercontent.com'));
+      expect(config.appName, 'PhotoE-Zi');
     });
   });
 }

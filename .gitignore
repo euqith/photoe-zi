@@ -46,3 +46,7 @@ app.*.map.json
 
 # Widget Preview related
 .widget_preview/
+
+# App Credentials & Secrets
+assets/config/photoe_zi_default_oauth.json
+*.oauth.json
