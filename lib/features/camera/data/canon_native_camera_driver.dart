@@ -194,7 +194,7 @@ class CanonNativeCameraDriver implements BaseCameraDriver {
     }
     try {
       final defaultIp = (driverId == 'fuji_wifi') ? '192.168.0.1' : '192.168.1.1';
-      final defaultPort = 15740;
+      final defaultPort = (driverId == 'fuji_wifi') ? 55740 : 15740;
 
       final ok = await _methodChannel.invokeMethod<bool>('connectCamera', {
         'driverType': driverId,

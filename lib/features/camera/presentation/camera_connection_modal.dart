@@ -39,8 +39,12 @@ class _CameraConnectionModalState extends State<CameraConnectionModal> {
   void initState() {
     super.initState();
     _selectedDriverId = widget.activeDriverId;
-    _ipController = TextEditingController(text: '192.168.1.1');
-    _portController = TextEditingController(text: '15740');
+    _ipController = TextEditingController(
+      text: _selectedDriverId == 'fuji_wifi' ? '192.168.0.1' : '192.168.1.1',
+    );
+    _portController = TextEditingController(
+      text: _selectedDriverId == 'fuji_wifi' ? '55740' : '15740',
+    );
     _loadDrivers();
   }
 
@@ -353,10 +357,10 @@ class _CameraConnectionModalState extends State<CameraConnectionModal> {
       onTap: () {
         setState(() {
           _selectedDriverId = id;
-          if (id == 'fuji_wifi' && (_ipController.text == '192.168.1.1' || _ipController.text.isEmpty)) {
+          if (id == 'fuji_wifi') {
             _ipController.text = '192.168.0.1';
-            _portController.text = '15740';
-          } else if (id == 'canon_wifi' && (_ipController.text == '192.168.0.1' || _ipController.text.isEmpty)) {
+            _portController.text = '55740';
+          } else if (id == 'canon_wifi') {
             _ipController.text = '192.168.1.1';
             _portController.text = '15740';
           }

@@ -121,8 +121,12 @@ class CameraBridgeManager: NSObject, FlutterStreamHandler, ICDeviceBrowserDelega
         connectPtpIp(host: ip, port: port, completion: result)
       } else if driverType == "fuji_wifi" {
         let ip = (args["ipAddress"] as? String) ?? "192.168.0.1"
-        let port = UInt16((args["port"] as? Int) ?? 15740)
-        connectPtpIp(host: ip, port: port, completion: result)
+        let rawPort = (args["port"] as? Int) ?? 55740
+        let port = UInt16(rawPort == 15740 ? 55740 : rawPort)
+        if rawPort == 15740 {
+          NSLog("[PtpIp] Remapping Fujifilm X-T10 port 15740 -> 55740")
+        }
+        connectPtpIp(host: ip, port: port, use82ByteFujiPacket: false, completion: result)
       } else {
         result(true)
       }
@@ -377,12 +381,24 @@ class CameraBridgeManager: NSObject, FlutterStreamHandler, ICDeviceBrowserDelega
 
   func cameraDeviceDidEnableAccessRestriction(_ device: ICDevice) {}
 
-  // MARK: - Wi-Fi PTP/IP Connection with 5-Second Handshake
+  // MARK: - Wi-Fi PTP/IP Connection with Handshake
   private var handshakeTimeoutWorkItem: DispatchWorkItem?
 
-  private func connectPtpIp(host: String, port: UInt16, completion: @escaping FlutterResult) {
+  // Persistent 16-byte GUID recognized by Fujifilm Wireless PTP/IP firmware so camera remembers pairing
+  private let fujiClientGuid: [UInt8] = [
+    0xF2, 0xE4, 0x53, 0x8F, 0xAD, 0xA5, 0x48, 0x5D,
+    0x87, 0xB2, 0x7F, 0x0B, 0xD3, 0xD5, 0xDE, 0xD0
+  ]
+
+  private func connectPtpIp(
+    host: String,
+    port: UInt16,
+    use82ByteFujiPacket: Bool = false,
+    completion: @escaping FlutterResult
+  ) {
     disconnect()
     sendEvent(type: "connectionStateChanged", data: "connecting")
+    NSLog("[PtpIp] Opening TCP socket to %@:%d (driver=%@, 82ByteMode=%d)...", host, port, activeDriverType, use82ByteFujiPacket ? 1 : 0)
 
     let nwHost = NWEndpoint.Host(host)
     let nwPort = NWEndpoint.Port(integerLiteral: port)
@@ -397,27 +413,37 @@ class CameraBridgeManager: NSObject, FlutterStreamHandler, ICDeviceBrowserDelega
       }
     }
 
-    // 10-second handshake timeout
+    // 15-second handshake timeout (allows time for user to press MENU/OK on camera body during first-time pairing)
     let timeoutWorkItem = DispatchWorkItem { [weak self] in
       guard let self = self, !self.isConnected else { return }
-      NSLog("[PtpIp] Handshake timed out after 10s")
+      NSLog("[PtpIp] Handshake timed out after 15s on %@:%d", host, port)
       self.disconnect()
       self.sendEvent(type: "connectionStateChanged", data: "error")
       finishConnect(false)
     }
     self.handshakeTimeoutWorkItem = timeoutWorkItem
-    DispatchQueue.main.asyncAfter(deadline: .now() + 10.0, execute: timeoutWorkItem)
+    DispatchQueue.main.asyncAfter(deadline: .now() + 15.0, execute: timeoutWorkItem)
 
     connection.stateUpdateHandler = { [weak self] state in
       guard let self = self else { return }
       switch state {
+      case .preparing:
+        NSLog("[PtpIp] TCP Socket preparing (%@:%d)...", host, port)
       case .ready:
-        NSLog("[PtpIp] TCP Socket ready to \(host):\(port). Initiating handshake...")
+        NSLog("[PtpIp] TCP Socket ready to %@:%d. Initiating handshake...", host, port)
         // Step 1: TCP Socket opened successfully.
         // Step 2: Send InitCommandRequest immediately
-        self.performPtpIpHandshake(connection: connection, finish: finishConnect)
+        self.performPtpIpHandshake(
+          connection: connection,
+          host: host,
+          port: port,
+          use82ByteFujiPacket: use82ByteFujiPacket,
+          finish: finishConnect
+        )
+      case .waiting(let err):
+        NSLog("[PtpIp] TCP Socket waiting (%@:%d): %@", host, port, String(describing: err))
       case .failed(let err):
-        NSLog("[PtpIp] TCP Socket failed: \(err)")
+        NSLog("[PtpIp] TCP Socket failed (%@:%d): %@", host, port, String(describing: err))
         self.handshakeTimeoutWorkItem?.cancel()
         self.isConnected = false
         self.sendEvent(type: "connectionStateChanged", data: "disconnected")
@@ -436,31 +462,61 @@ class CameraBridgeManager: NSObject, FlutterStreamHandler, ICDeviceBrowserDelega
     connection.start(queue: .global(qos: .userInitiated))
   }
 
-  private func performPtpIpHandshake(connection: NWConnection, finish: @escaping (Bool) -> Void) {
-    // 2. Send InitCommandRequest (Packet Type: 0x00000001)
-    // EXACTLY 40 BYTES for Fujifilm PTP/IP:
-    // [0..3]: Length = 40 (UInt32 LE)
-    // [4..7]: Type = 1 (UInt32 LE, PTPIP_INIT_COMMAND_REQ)
-    // [8..23]: GUID (16 bytes)
-    // [24..39]: Device Name UTF-16LE null-terminated (16 bytes, padded with zeros)
-    var packet = Data(count: 40)
-
-    var lenLE = UInt32(40).littleEndian
-    packet.replaceSubrange(0..<4, with: Data(bytes: &lenLE, count: 4))
-
-    var typeLE = UInt32(1).littleEndian
-    packet.replaceSubrange(4..<8, with: Data(bytes: &typeLE, count: 4))
-
-    var guid = [UInt8](repeating: 0, count: 16)
-    _ = SecRandomCopyBytes(kSecRandomDefault, 16, &guid)
-    packet.replaceSubrange(8..<24, with: Data(guid))
-
+  private func buildInitCommandPacket(use82ByteFujiPacket: Bool) -> Data {
     let appName = "PhotoEZ\0"
-    if let nameData = appName.data(using: .utf16LittleEndian) {
+    let nameData = appName.data(using: .utf16LittleEndian) ?? Data()
+
+    if use82ByteFujiPacket {
+      // 82-byte (0x52) Fujifilm X-Series InitCommandRequest layout:
+      // [0..3]: Length = 82 (0x52, UInt32 LE)
+      // [4..7]: Type = 1 (UInt32 LE, PTPIP_INIT_COMMAND_REQ)
+      // [8..23]: GUID (16 bytes)
+      // [24..27]: Protocol Version / Token (4 bytes: 02 78 A8 C0)
+      // [28..81]: Device Name UTF-16LE null-terminated (54 bytes, padded with zeros)
+      var packet = Data(count: 82)
+      var lenLE = UInt32(82).littleEndian
+      packet.replaceSubrange(0..<4, with: Data(bytes: &lenLE, count: 4))
+
+      var typeLE = UInt32(1).littleEndian
+      packet.replaceSubrange(4..<8, with: Data(bytes: &typeLE, count: 4))
+
+      packet.replaceSubrange(8..<24, with: Data(fujiClientGuid))
+
+      let versionBytes: [UInt8] = [0x02, 0x78, 0xA8, 0xC0]
+      packet.replaceSubrange(24..<28, with: Data(versionBytes))
+
+      let copyLen = min(nameData.count, 54)
+      packet.replaceSubrange(28..<(28 + copyLen), with: nameData.prefix(copyLen))
+      return packet
+    } else {
+      // 40-byte InitCommandRequest layout:
+      // [0..3]: Length = 40 (0x28, UInt32 LE)
+      // [4..7]: Type = 1 (UInt32 LE, PTPIP_INIT_COMMAND_REQ)
+      // [8..23]: GUID (16 bytes)
+      // [24..39]: Device Name UTF-16LE null-terminated (16 bytes, padded with zeros)
+      var packet = Data(count: 40)
+      var lenLE = UInt32(40).littleEndian
+      packet.replaceSubrange(0..<4, with: Data(bytes: &lenLE, count: 4))
+
+      var typeLE = UInt32(1).littleEndian
+      packet.replaceSubrange(4..<8, with: Data(bytes: &typeLE, count: 4))
+
+      packet.replaceSubrange(8..<24, with: Data(fujiClientGuid))
+
       let copyLen = min(nameData.count, 16)
       packet.replaceSubrange(24..<(24 + copyLen), with: nameData.prefix(copyLen))
+      return packet
     }
+  }
 
+  private func performPtpIpHandshake(
+    connection: NWConnection,
+    host: String,
+    port: UInt16,
+    use82ByteFujiPacket: Bool,
+    finish: @escaping (Bool) -> Void
+  ) {
+    let packet = buildInitCommandPacket(use82ByteFujiPacket: use82ByteFujiPacket)
     let txHex = packet.map { String(format: "%02hhX", $0) }.joined(separator: " ")
     NSLog("[PtpIp] TX InitCommandRequest (%d bytes): %@", packet.count, txHex)
 
@@ -475,10 +531,25 @@ class CameraBridgeManager: NSObject, FlutterStreamHandler, ICDeviceBrowserDelega
 
       // 3. Wait for InitCommandAck (Packet Type: 0x00000002)
       self.waitForInitCommandAck(connection: connection) { [weak self] ackSuccess in
-        guard let self = self, ackSuccess else {
+        guard let self = self else { return }
+        if !ackSuccess {
+          // If 40-byte packet was rejected by Fujifilm camera, auto-retry once with 82-byte (0x52) Fujifilm packet
+          if self.activeDriverType == "fuji_wifi" && !use82ByteFujiPacket {
+            NSLog("[PtpIp] 40-byte InitCommandRequest rejected by camera; auto-retrying with 82-byte (0x52) Fujifilm packet...")
+            self.handshakeTimeoutWorkItem?.cancel()
+            self.activeConnection?.cancel()
+            self.activeConnection = nil
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) { [weak self] in
+              self?.connectPtpIp(host: host, port: port, use82ByteFujiPacket: true, completion: { ok in
+                finish((ok as? Bool) ?? false)
+              })
+            }
+            return
+          }
+
           NSLog("[PtpIp] Failed waiting for InitCommandAck")
-          self?.disconnect()
-          self?.sendEvent(type: "connectionStateChanged", data: "error")
+          self.disconnect()
+          self.sendEvent(type: "connectionStateChanged", data: "error")
           finish(false)
           return
         }
@@ -515,7 +586,7 @@ class CameraBridgeManager: NSObject, FlutterStreamHandler, ICDeviceBrowserDelega
       let rxHex = data.map { String(format: "%02hhX", $0) }.joined(separator: " ")
       NSLog("[PtpIp] RX InitCommand response (%d bytes): %@", data.count, rxHex)
 
-      let ackType = data.subdata(in: 4..<8).withUnsafeBytes { $0.load(as: UInt32.self) }
+      let ackType = UInt32(littleEndian: data.subdata(in: 4..<8).withUnsafeBytes { $0.load(as: UInt32.self) })
       if ackType == 2 { // PTPIP_INIT_COMMAND_ACK = 0x00000002
         completion(true)
       } else {
@@ -526,22 +597,42 @@ class CameraBridgeManager: NSObject, FlutterStreamHandler, ICDeviceBrowserDelega
   }
 
   private func sendOpenSession(connection: NWConnection, completion: @escaping (Bool) -> Void) {
-    // PTPIP_CMD_REQ: Type 6, DataPhase 1, OpCode 0x1002, TransID 1, SessionID 1
     var openSessionPacket = Data()
-    let opLen: UInt32 = 22
-    var opLenLE = opLen.littleEndian
-    var opTypeLE = UInt32(6).littleEndian // PTPIP_CMD_REQ
-    var dataPhaseLE = UInt32(1).littleEndian
-    var opCodeLE = UInt16(0x1002).littleEndian // OpenSession
-    var transIdLE = UInt32(1).littleEndian
-    var sessionIdLE = UInt32(1).littleEndian // SessionID = 1
 
-    openSessionPacket.append(Data(bytes: &opLenLE, count: 4))
-    openSessionPacket.append(Data(bytes: &opTypeLE, count: 4))
-    openSessionPacket.append(Data(bytes: &dataPhaseLE, count: 4))
-    openSessionPacket.append(Data(bytes: &opCodeLE, count: 2))
-    openSessionPacket.append(Data(bytes: &transIdLE, count: 4))
-    openSessionPacket.append(Data(bytes: &sessionIdLE, count: 4))
+    if activeDriverType == "fuji_wifi" {
+      // Fujifilm port 55740 16-byte OpenSession container:
+      // [0..3]: Length = 16 (10 00 00 00)
+      // [4..5]: Container Type = 1 (01 00, Operation Request)
+      // [6..7]: OpCode = 0x1002 (02 10, OpenSession)
+      // [8..11]: TransID = 1 (01 00 00 00)
+      // [12..15]: SessionID = 1 (01 00 00 00)
+      var opLenLE = UInt32(16).littleEndian
+      var containerTypeLE = UInt16(1).littleEndian
+      var opCodeLE = UInt16(0x1002).littleEndian
+      var transIdLE = UInt32(1).littleEndian
+      var sessionIdLE = UInt32(1).littleEndian
+
+      openSessionPacket.append(Data(bytes: &opLenLE, count: 4))
+      openSessionPacket.append(Data(bytes: &containerTypeLE, count: 2))
+      openSessionPacket.append(Data(bytes: &opCodeLE, count: 2))
+      openSessionPacket.append(Data(bytes: &transIdLE, count: 4))
+      openSessionPacket.append(Data(bytes: &sessionIdLE, count: 4))
+    } else {
+      // Standard PTP/IP 22-byte PTPIP_CMD_REQ: Type 6, DataPhase 1, OpCode 0x1002, TransID 1, SessionID 1
+      var opLenLE = UInt32(22).littleEndian
+      var opTypeLE = UInt32(6).littleEndian
+      var dataPhaseLE = UInt32(1).littleEndian
+      var opCodeLE = UInt16(0x1002).littleEndian
+      var transIdLE = UInt32(1).littleEndian
+      var sessionIdLE = UInt32(1).littleEndian
+
+      openSessionPacket.append(Data(bytes: &opLenLE, count: 4))
+      openSessionPacket.append(Data(bytes: &opTypeLE, count: 4))
+      openSessionPacket.append(Data(bytes: &dataPhaseLE, count: 4))
+      openSessionPacket.append(Data(bytes: &opCodeLE, count: 2))
+      openSessionPacket.append(Data(bytes: &transIdLE, count: 4))
+      openSessionPacket.append(Data(bytes: &sessionIdLE, count: 4))
+    }
 
     let txSessionHex = openSessionPacket.map { String(format: "%02hhX", $0) }.joined(separator: " ")
     NSLog("[PtpIp] TX OpenSession (%d bytes): %@", openSessionPacket.count, txSessionHex)
@@ -559,8 +650,15 @@ class CameraBridgeManager: NSObject, FlutterStreamHandler, ICDeviceBrowserDelega
   private func startReceivingPackets() {
     guard let conn = activeConnection, isConnected else { return }
     conn.receive(minimumIncompleteLength: 8, maximumLength: 65536) { [weak self] (data, context, isComplete, error) in
-      guard let self = self, let data = data, data.count >= 8 else { return }
-      let type = data.subdata(in: 4..<8).withUnsafeBytes { $0.load(as: UInt32.self) }
+      guard let self = self, let data = data, data.count >= 8 else {
+        if let error = error {
+          NSLog("[PtpIp] Stream receive error: \(error)")
+        }
+        return
+      }
+      let rxHex = data.map { String(format: "%02hhX", $0) }.joined(separator: " ")
+      NSLog("[PtpIp] RX Stream Packet (%d bytes): %@", data.count, rxHex)
+      let type = UInt32(littleEndian: data.subdata(in: 4..<8).withUnsafeBytes { $0.load(as: UInt32.self) })
 
       if type == 8 { // PTPIP_EVENT
         let photoPayload: [String: Any] = [

@@ -182,9 +182,9 @@ void main() {
       await tester.tap(find.byKey(const Key('camera_driver_option_fuji_wifi')));
       await tester.pumpAndSettle();
 
-      // IP input should auto-default to Fujifilm gateway 192.168.0.1 and port 15740
+      // IP input should auto-default to Fujifilm gateway 192.168.0.1 and port 55740
       expect(find.text('192.168.0.1'), findsOneWidget);
-      expect(find.text('15740'), findsWidgets);
+      expect(find.text('55740'), findsWidgets);
 
       // Confirm connect button
       await tester.ensureVisible(find.byKey(const Key('btn_confirm_camera_connection')));
@@ -193,7 +193,7 @@ void main() {
 
       expect(selectedDriver, 'fuji_wifi');
       expect(selectedIp, '192.168.0.1');
-      expect(selectedPort, 15740);
+      expect(selectedPort, 55740);
     });
 
     test('Live View EVF Auto-Restart: preserves wasInLiveView and restarts after buffer delay', () async {

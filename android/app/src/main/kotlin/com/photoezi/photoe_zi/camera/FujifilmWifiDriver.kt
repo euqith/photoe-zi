@@ -37,14 +37,23 @@ class FujifilmWifiDriver(
 
     private val mainHandler = Handler(Looper.getMainLooper())
 
-    suspend fun connect(ipAddress: String = "192.168.0.1", port: Int = 15740): Boolean = withContext(Dispatchers.IO) {
+    private val fujiClientGuid = byteArrayOf(
+        0xF2.toByte(), 0xE4.toByte(), 0x53.toByte(), 0x8F.toByte(),
+        0xAD.toByte(), 0xA5.toByte(), 0x48.toByte(), 0x5D.toByte(),
+        0x87.toByte(), 0xB2.toByte(), 0x7F.toByte(), 0x0B.toByte(),
+        0xD3.toByte(), 0xD5.toByte(), 0xDE.toByte(), 0xD0.toByte()
+    )
+
+    suspend fun connect(ipAddress: String = "192.168.0.1", port: Int = 55740): Boolean = withContext(Dispatchers.IO) {
+        val targetPort = if (port == 15740) 55740 else port
         disconnect()
         notifyState("connecting")
 
         try {
             val socket = Socket()
-            socket.connect(InetSocketAddress(ipAddress, port), 5000)
-            socket.soTimeout = 5000 // 5 seconds handshake timeout
+            println("[PtpIp] Opening TCP socket to $ipAddress:$targetPort...")
+            socket.connect(InetSocketAddress(ipAddress, targetPort), 5000)
+            socket.soTimeout = 15000 // 15 seconds handshake timeout
             cmdSocket = socket
             cmdIn = socket.getInputStream()
             cmdOut = socket.getOutputStream()
@@ -58,9 +67,7 @@ class FujifilmWifiDriver(
             val buffer = ByteBuffer.wrap(packet).order(ByteOrder.LITTLE_ENDIAN)
             buffer.putInt(40)
             buffer.putInt(0x00000001) // PTPIP_INIT_COMMAND_REQ
-
-            val guid = ByteArray(16) { (0..255).random().toByte() }
-            buffer.put(guid)
+            buffer.put(fujiClientGuid)
 
             val nameBytes = "PhotoEZ\u0000".toByteArray(Charsets.UTF_16LE)
             val nameLen = minOf(nameBytes.size, 16)
@@ -72,8 +79,34 @@ class FujifilmWifiDriver(
             cmdOut?.write(packet)
             cmdOut?.flush()
 
-            // 2. Wait for Init Command Ack
-            val ackHeader = readExact(cmdIn!!, 8) ?: throw Exception("Timeout or EOF waiting for InitCommandAck")
+            // 2. Wait for Init Command Ack (if 40-byte rejected, fallback to 82-byte 0x52 Fujifilm packet)
+            var ackHeader = readExact(cmdIn!!, 8)
+            if (ackHeader == null) {
+                println("[PtpIp] 40-byte InitCommandRequest closed by camera; retrying with 82-byte (0x52) Fujifilm packet...")
+                try { socket.close() } catch (_: Exception) {}
+                val retrySocket = Socket()
+                retrySocket.connect(InetSocketAddress(ipAddress, targetPort), 5000)
+                retrySocket.soTimeout = 15000
+                cmdSocket = retrySocket
+                cmdIn = retrySocket.getInputStream()
+                cmdOut = retrySocket.getOutputStream()
+
+                val packet82 = ByteArray(82)
+                val buf82 = ByteBuffer.wrap(packet82).order(ByteOrder.LITTLE_ENDIAN)
+                buf82.putInt(82) // 0x52
+                buf82.putInt(0x00000001)
+                buf82.put(fujiClientGuid)
+                buf82.put(byteArrayOf(0x02, 0x78, 0xA8.toByte(), 0xC0.toByte()))
+                val copyLen82 = minOf(nameBytes.size, 54)
+                System.arraycopy(nameBytes, 0, packet82, 28, copyLen82)
+
+                val txHex82 = packet82.joinToString(" ") { String.format("%02X", it) }
+                println("[PtpIp] TX InitCommandRequest (82 bytes): $txHex82")
+                cmdOut?.write(packet82)
+                cmdOut?.flush()
+
+                ackHeader = readExact(cmdIn!!, 8) ?: throw Exception("Timeout or EOF waiting for InitCommandAck")
+            }
             val rxHex = ackHeader.joinToString(" ") { String.format("%02X", it) }
             println("[PtpIp] RX InitCommand Ack Header (8 bytes): $rxHex")
 
@@ -200,16 +233,23 @@ class FujifilmWifiDriver(
     }
 
     private fun sendPtpCommand(opCode: Int, params: List<Int>) {
-        val payloadLen = 4 + 4 + 4 + 4 + (params.size * 4)
+        // Fujifilm port 55740 16-byte OpenSession / Operation Request container:
+        // [0..3]: Length (12 + params.size * 4)
+        // [4..5]: Container Type = 1 (Operation Request, UInt16 LE)
+        // [6..7]: OpCode (UInt16 LE)
+        // [8..11]: Transaction ID (UInt32 LE)
+        // [12..]: Parameters (UInt32 LE each)
+        val payloadLen = 4 + 2 + 2 + 4 + (params.size * 4)
         val buf = ByteBuffer.allocate(payloadLen).order(ByteOrder.LITTLE_ENDIAN)
         buf.putInt(payloadLen)
-        buf.putInt(0x00000006) // PTPIP_CMD_REQ
-        buf.putInt(1)          // Data phase
+        buf.putShort(1) // Container Type 1 = Operation Request
         buf.putShort(opCode.toShort())
         buf.putInt(transactionId++)
         for (param in params) {
             buf.putInt(param)
         }
+        val txHex = buf.array().joinToString(" ") { String.format("%02X", it) }
+        println("[PtpIp] TX PTP Command 0x${String.format("%04X", opCode)} ($payloadLen bytes): $txHex")
         cmdOut?.write(buf.array())
         cmdOut?.flush()
     }
