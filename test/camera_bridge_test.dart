@@ -4,6 +4,7 @@ import 'dart:typed_data';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:photoe_zi/features/camera/data/camera_driver_manager.dart';
+import 'package:photoe_zi/features/camera/data/canon_native_camera_driver.dart';
 import 'package:photoe_zi/features/camera/data/mock_camera_driver.dart';
 import 'package:photoe_zi/features/camera/domain/base_camera_driver.dart';
 import 'package:photoe_zi/features/camera/domain/camera_types.dart';
@@ -227,6 +228,21 @@ void main() {
 
       await sub.cancel();
       mockDriver.dispose();
+    });
+
+    test('Issue #5.2 — Wi-Fi Auto-Reconnect on unexpected disconnect', () async {
+      final fujiDriver = CanonNativeCameraDriver(
+        driverId: 'fuji_wifi',
+        driverName: 'Fujifilm X-T10 (Wi-Fi PTP/IP)',
+        connectionType: CameraConnectionType.wifi,
+      );
+
+      expect(fujiDriver.connectionType, CameraConnectionType.wifi);
+      expect(fujiDriver.isAutoReconnectScheduled, false);
+
+      // Intentional disconnect must NOT schedule auto-reconnect
+      await fujiDriver.disconnect();
+      expect(fujiDriver.isAutoReconnectScheduled, false);
     });
   });
 }

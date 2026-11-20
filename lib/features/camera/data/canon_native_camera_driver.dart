@@ -32,6 +32,13 @@ class CanonNativeCameraDriver implements BaseCameraDriver {
   bool _isLiveViewReconnecting = false;
   Timer? _reconnectTimeoutTimer;
 
+  bool _intentionalDisconnect = false;
+  Timer? _autoReconnectTimer;
+  String? _lastIpAddress;
+  int? _lastPort;
+
+  bool get isAutoReconnectScheduled => _autoReconnectTimer?.isActive ?? false;
+
   CanonNativeCameraDriver({
     required this.driverId,
     String? driverName,
@@ -66,6 +73,14 @@ class CanonNativeCameraDriver implements BaseCameraDriver {
             _state = newState;
             if (!_connectionController.isClosed) {
               _connectionController.add(newState);
+            }
+            if ((newState == CameraConnectionState.disconnected ||
+                    newState == CameraConnectionState.error) &&
+                !_intentionalDisconnect &&
+                _connectionType == CameraConnectionType.wifi) {
+              _scheduleAutoReconnect();
+            } else if (newState == CameraConnectionState.connected) {
+              _autoReconnectTimer?.cancel();
             }
           } else if (type == 'photoAdded' && data is Map) {
             _handleIncomingNativePhoto(data);
@@ -164,6 +179,11 @@ class CanonNativeCameraDriver implements BaseCameraDriver {
 
   @override
   Future<bool> connect({String? ipAddress, int? port}) async {
+    _intentionalDisconnect = false;
+    _lastIpAddress = ipAddress;
+    _lastPort = port;
+    _autoReconnectTimer?.cancel();
+
     _state = CameraConnectionState.connecting;
     if (!_connectionController.isClosed) {
       _connectionController.add(CameraConnectionState.connecting);
@@ -196,6 +216,8 @@ class CanonNativeCameraDriver implements BaseCameraDriver {
 
   @override
   Future<void> disconnect() async {
+    _intentionalDisconnect = true;
+    _autoReconnectTimer?.cancel();
     try {
       await _methodChannel.invokeMethod('disconnectCamera');
     } catch (_) {}
@@ -203,6 +225,17 @@ class CanonNativeCameraDriver implements BaseCameraDriver {
     if (!_connectionController.isClosed) {
       _connectionController.add(CameraConnectionState.disconnected);
     }
+  }
+
+  void _scheduleAutoReconnect() {
+    _autoReconnectTimer?.cancel();
+    _autoReconnectTimer = Timer(const Duration(seconds: 3), () async {
+      if (!_intentionalDisconnect &&
+          _state != CameraConnectionState.connected &&
+          _state != CameraConnectionState.connecting) {
+        await connect(ipAddress: _lastIpAddress, port: _lastPort);
+      }
+    });
   }
 
   @override
