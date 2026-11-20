@@ -90,6 +90,7 @@ class _GpuLutImageRendererState extends State<GpuLutImageRenderer> {
       return Image.memory(
         widget.imageBytes,
         fit: BoxFit.contain,
+        filterQuality: FilterQuality.high,
         gaplessPlayback: true,
       );
     }
@@ -110,6 +111,7 @@ class _GpuLutImageRendererState extends State<GpuLutImageRenderer> {
         child: Image.memory(
           widget.imageBytes,
           fit: BoxFit.contain,
+          filterQuality: FilterQuality.high,
           gaplessPlayback: true,
         ),
       );
@@ -183,7 +185,9 @@ class _GpuLutShaderPainter extends CustomPainter {
     // uniform sampler2D uLutTex (sampler 1)
     shader.setImageSampler(1, lutTexture);
 
-    final paint = Paint()..shader = shader;
+    final paint = Paint()
+      ..shader = shader
+      ..filterQuality = FilterQuality.high;
     canvas.drawRect(Offset.zero & size, paint);
   }
 

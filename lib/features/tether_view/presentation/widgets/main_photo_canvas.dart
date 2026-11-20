@@ -114,6 +114,7 @@ class _MainPhotoCanvasState extends State<MainPhotoCanvas> {
       return Image.memory(
         widget.liveViewFrame!,
         fit: BoxFit.contain,
+        filterQuality: FilterQuality.high,
         gaplessPlayback: true,
       );
     }
@@ -159,6 +160,7 @@ class _MainPhotoCanvasState extends State<MainPhotoCanvas> {
                   child: Image.memory(
                     widget.liveViewFrame!,
                     fit: BoxFit.contain,
+                    filterQuality: FilterQuality.high,
                     gaplessPlayback: true,
                   ),
                 ),

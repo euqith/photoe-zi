@@ -366,6 +366,7 @@ class _FilmstripBarState extends State<FilmstripBar> {
       imageThumb = Image.memory(
         previewBytes,
         fit: BoxFit.cover,
+        filterQuality: FilterQuality.medium,
         gaplessPlayback: true,
       );
     } else if (photo.previewPath != null &&
@@ -373,6 +374,7 @@ class _FilmstripBarState extends State<FilmstripBar> {
       imageThumb = Image.file(
         File(photo.previewPath!),
         fit: BoxFit.cover,
+        filterQuality: FilterQuality.medium,
         gaplessPlayback: true,
       );
     } else if (photo.fullResPath != null &&
@@ -380,6 +382,7 @@ class _FilmstripBarState extends State<FilmstripBar> {
       imageThumb = Image.file(
         File(photo.fullResPath!),
         fit: BoxFit.cover,
+        filterQuality: FilterQuality.medium,
         gaplessPlayback: true,
       );
     } else {
