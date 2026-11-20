@@ -122,7 +122,7 @@ class CameraBridgeManager: NSObject, FlutterStreamHandler, ICDeviceBrowserDelega
         connectPtpIp(host: ip, port: port, completion: result)
       } else if driverType == "fuji_wifi" {
         let ip = (args["ipAddress"] as? String) ?? "192.168.0.1"
-        let port = UInt16((args["port"] as? Int) ?? 55740)
+        let port = UInt16((args["port"] as? Int) ?? 15740)
         connectPtpIp(host: ip, port: port, completion: result)
       } else {
         result(true)
@@ -378,7 +378,9 @@ class CameraBridgeManager: NSObject, FlutterStreamHandler, ICDeviceBrowserDelega
 
   func cameraDeviceDidEnableAccessRestriction(_ device: ICDevice) {}
 
-  // MARK: - Wi-Fi PTP/IP Connection
+  // MARK: - Wi-Fi PTP/IP Connection with 5-Second Handshake
+  private var handshakeTimeoutWorkItem: DispatchWorkItem?
+
   private func connectPtpIp(host: String, port: UInt16, completion: @escaping FlutterResult) {
     disconnect()
     sendEvent(type: "connectionStateChanged", data: "connecting")
@@ -388,23 +390,154 @@ class CameraBridgeManager: NSObject, FlutterStreamHandler, ICDeviceBrowserDelega
     let connection = NWConnection(host: nwHost, port: nwPort, using: .tcp)
     self.activeConnection = connection
 
+    var completionCalled = false
+    let finishConnect = { (success: Bool) in
+      if !completionCalled {
+        completionCalled = true
+        completion(success)
+      }
+    }
+
+    // 5-second handshake timeout
+    let timeoutWorkItem = DispatchWorkItem { [weak self] in
+      guard let self = self, !self.isConnected else { return }
+      self.disconnect()
+      self.sendEvent(type: "connectionStateChanged", data: "error")
+      finishConnect(false)
+    }
+    self.handshakeTimeoutWorkItem = timeoutWorkItem
+    DispatchQueue.main.asyncAfter(deadline: .now() + 5.0, execute: timeoutWorkItem)
+
     connection.stateUpdateHandler = { [weak self] state in
       guard let self = self else { return }
       switch state {
       case .ready:
-        self.isConnected = true
-        self.sendEvent(type: "connectionStateChanged", data: "connected")
-        self.startReceivingPackets()
+        // Step 1: TCP Socket opened successfully.
+        // Step 2: Send InitCommandRequest immediately
+        self.performPtpIpHandshake(connection: connection, finish: finishConnect)
       case .failed, .cancelled:
+        self.handshakeTimeoutWorkItem?.cancel()
         self.isConnected = false
         self.sendEvent(type: "connectionStateChanged", data: "disconnected")
+        finishConnect(false)
       default:
         break
       }
     }
 
     connection.start(queue: .global(qos: .userInitiated))
-    completion(true)
+  }
+
+  private func performPtpIpHandshake(connection: NWConnection, finish: @escaping (Bool) -> Void) {
+    // 2. Send InitCommandRequest (Packet Type: 0x00000001)
+    // 16-byte random GUID + UTF-16LE Null-terminated friendly name ("PhotoE-Zi\0") + version (0x00010000)
+    var guid = [UInt8](repeating: 0, count: 16)
+    _ = SecRandomCopyBytes(kSecRandomDefault, 16, &guid)
+
+    let appName = "PhotoE-Zi\0"
+    guard let nameData = appName.data(using: .utf16LittleEndian) else {
+      self.disconnect()
+      self.sendEvent(type: "connectionStateChanged", data: "error")
+      finish(false)
+      return
+    }
+
+    let version: UInt32 = 0x00010000
+    let packetLen = UInt32(4 + 4 + 16 + nameData.count + 4)
+    var packet = Data()
+    var pLen = packetLen.littleEndian
+    var pType = UInt32(1).littleEndian
+    var pVer = version.littleEndian
+
+    packet.append(Data(bytes: &pLen, count: 4))
+    packet.append(Data(bytes: &pType, count: 4))
+    packet.append(Data(guid))
+    packet.append(nameData)
+    packet.append(Data(bytes: &pVer, count: 4))
+
+    connection.send(content: packet, completion: .contentProcessed { [weak self] error in
+      guard let self = self, error == nil else {
+        self?.disconnect()
+        self?.sendEvent(type: "connectionStateChanged", data: "error")
+        finish(false)
+        return
+      }
+
+      // 3. Wait for InitCommandAck (Packet Type: 0x00000002)
+      self.waitForInitCommandAck(connection: connection) { [weak self] ackSuccess in
+        guard let self = self, ackSuccess else {
+          self?.disconnect()
+          self?.sendEvent(type: "connectionStateChanged", data: "error")
+          finish(false)
+          return
+        }
+
+        // 4. Send OpenSession (Operation Code: 0x1002, SessionID = 1)
+        self.sendOpenSession(connection: connection) { [weak self] sessionSuccess in
+          guard let self = self, sessionSuccess else {
+            self?.disconnect()
+            self?.sendEvent(type: "connectionStateChanged", data: "error")
+            finish(false)
+            return
+          }
+
+          // 5. Update State: HANYA ubah state koneksi menjadi connected setelah langkah 1 sampai 4 berhasil
+          self.handshakeTimeoutWorkItem?.cancel()
+          self.isConnected = true
+          self.sendEvent(type: "connectionStateChanged", data: "connected")
+          self.startReceivingPackets()
+          finish(true)
+        }
+      }
+    })
+  }
+
+  private func waitForInitCommandAck(connection: NWConnection, completion: @escaping (Bool) -> Void) {
+    connection.receive(minimumIncompleteLength: 8, maximumLength: 8) { [weak self] (data, _, _, error) in
+      guard let self = self, error == nil, let data = data, data.count == 8 else {
+        completion(false)
+        return
+      }
+      let ackLen = data.subdata(in: 0..<4).withUnsafeBytes { $0.load(as: UInt32.self) }
+      let ackType = data.subdata(in: 4..<8).withUnsafeBytes { $0.load(as: UInt32.self) }
+
+      if ackType != 2 { // PTPIP_INIT_COMMAND_ACK = 0x00000002
+        completion(false)
+        return
+      }
+
+      let remaining = Int(ackLen) - 8
+      if remaining > 0 {
+        connection.receive(minimumIncompleteLength: remaining, maximumLength: remaining) { (_, _, _, error) in
+          completion(error == nil)
+        }
+      } else {
+        completion(true)
+      }
+    }
+  }
+
+  private func sendOpenSession(connection: NWConnection, completion: @escaping (Bool) -> Void) {
+    // PTPIP_CMD_REQ: Type 6, DataPhase 1, OpCode 0x1002, TransID 1, SessionID 1
+    var openSessionPacket = Data()
+    let opLen = UInt32(4 + 4 + 4 + 2 + 4 + 4) // 22 bytes
+    var opLenLE = opLen.littleEndian
+    var opTypeLE = UInt32(6).littleEndian // PTPIP_CMD_REQ
+    var dataPhaseLE = UInt32(1).littleEndian
+    var opCodeLE = UInt16(0x1002).littleEndian // OpenSession
+    var transIdLE = UInt32(1).littleEndian
+    var sessionIdLE = UInt32(1).littleEndian // SessionID = 1
+
+    openSessionPacket.append(Data(bytes: &opLenLE, count: 4))
+    openSessionPacket.append(Data(bytes: &opTypeLE, count: 4))
+    openSessionPacket.append(Data(bytes: &dataPhaseLE, count: 4))
+    openSessionPacket.append(Data(bytes: &opCodeLE, count: 2))
+    openSessionPacket.append(Data(bytes: &transIdLE, count: 4))
+    openSessionPacket.append(Data(bytes: &sessionIdLE, count: 4))
+
+    connection.send(content: openSessionPacket, completion: .contentProcessed { error in
+      completion(error == nil)
+    })
   }
 
   private func startReceivingPackets() {
@@ -437,6 +570,8 @@ class CameraBridgeManager: NSObject, FlutterStreamHandler, ICDeviceBrowserDelega
   }
 
   func disconnect() {
+    handshakeTimeoutWorkItem?.cancel()
+    handshakeTimeoutWorkItem = nil
     isConnected = false
     activeConnection?.cancel()
     activeConnection = nil

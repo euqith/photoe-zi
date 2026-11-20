@@ -355,7 +355,7 @@ class _CameraConnectionModalState extends State<CameraConnectionModal> {
           _selectedDriverId = id;
           if (id == 'fuji_wifi' && (_ipController.text == '192.168.1.1' || _ipController.text.isEmpty)) {
             _ipController.text = '192.168.0.1';
-            _portController.text = '55740';
+            _portController.text = '15740';
           } else if (id == 'canon_wifi' && (_ipController.text == '192.168.0.1' || _ipController.text.isEmpty)) {
             _ipController.text = '192.168.1.1';
             _portController.text = '15740';

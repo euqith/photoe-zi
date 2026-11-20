@@ -37,21 +37,21 @@ class FujifilmWifiDriver(
 
     private val mainHandler = Handler(Looper.getMainLooper())
 
-    suspend fun connect(ipAddress: String = "192.168.0.1", port: Int = 55740): Boolean = withContext(Dispatchers.IO) {
+    suspend fun connect(ipAddress: String = "192.168.0.1", port: Int = 15740): Boolean = withContext(Dispatchers.IO) {
         disconnect()
         notifyState("connecting")
 
         try {
             val socket = Socket()
             socket.connect(InetSocketAddress(ipAddress, port), 5000)
-            socket.soTimeout = 0 // Keep-alive
+            socket.soTimeout = 5000 // 5 seconds handshake timeout
             cmdSocket = socket
             cmdIn = socket.getInputStream()
             cmdOut = socket.getOutputStream()
 
             // 1. Send Init Command Request for Fujifilm
-            // Packet layout: Length (4B), Type = 1 (Init_Command_Request, 4B), GUID (16B), Friendly Name (UTF-16LE null terminated)
-            val guid = ByteArray(16) { 0x42 }
+            // Packet layout: Length (4B), Type = 1 (Init_Command_Request, 4B), GUID (16B), Friendly Name (UTF-16LE null terminated), Version (4B)
+            val guid = ByteArray(16) { (0..255).random().toByte() }
             val clientName = "PhotoE-Zi\u0000".toByteArray(Charsets.UTF_16LE)
             val packetLen = 4 + 4 + 16 + clientName.size + 4 // version (4B)
             val buffer = ByteBuffer.allocate(packetLen).order(ByteOrder.LITTLE_ENDIAN)
@@ -64,28 +64,34 @@ class FujifilmWifiDriver(
             cmdOut?.write(buffer.array())
             cmdOut?.flush()
 
-            // Read Init Command Ack
-            val ackHeader = readExact(cmdIn!!, 8) ?: return@withContext false
+            // 2. Wait for Init Command Ack
+            val ackHeader = readExact(cmdIn!!, 8) ?: throw Exception("Timeout or EOF waiting for InitCommandAck")
             val ackBuf = ByteBuffer.wrap(ackHeader).order(ByteOrder.LITTLE_ENDIAN)
             val ackLen = ackBuf.int
             val ackType = ackBuf.int
 
-            if (ackType == 0x00000002) { // PTPIP_INIT_COMMAND_ACK
-                val ackBody = readExact(cmdIn!!, ackLen - 8)
-                if (ackBody != null && ackBody.size >= 4) {
+            if (ackType != 0x00000002) { // PTPIP_INIT_COMMAND_ACK
+                throw Exception("Invalid Ack type: $ackType")
+            }
+            if (ackLen > 8) {
+                val ackBody = readExact(cmdIn!!, ackLen - 8) ?: throw Exception("Timeout reading Ack body")
+                if (ackBody.size >= 4) {
                     val bodyBuf = ByteBuffer.wrap(ackBody).order(ByteOrder.LITTLE_ENDIAN)
                     connectionNumber = bodyBuf.int
                 }
             }
 
-            // 2. Open Session (PTP 0x1002)
+            // 3. Send Open Session (PTP 0x1002) with SessionID = 1
             sendPtpCommand(0x1002, listOf(1)) // Session ID 1
 
-            // 3. Connect Event Socket if supported
+            // 4. Connect Event Socket if supported
             connectEventSocket(ipAddress, port)
 
+            socket.soTimeout = 0 // Remove timeout for regular event listening
             isConnected = true
             isListening = true
+
+            // 5. Update State: HANYA ubah state koneksi menjadi connected setelah langkah 1 sampai 4 berhasil
             notifyState("connected")
 
             startEventListener()
