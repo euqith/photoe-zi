@@ -13,6 +13,7 @@ class TopWorkspaceBar extends StatelessWidget {
   final int syncedCount;
   final int totalCount;
   final VoidCallback onToggleCamera;
+  final VoidCallback? onOpenConnectionModal;
   final VoidCallback onManualMockCapture;
   final VoidCallback onToggleZenMode;
   final VoidCallback onToggleBeforeAfter;
@@ -33,6 +34,7 @@ class TopWorkspaceBar extends StatelessWidget {
     required this.syncedCount,
     required this.totalCount,
     required this.onToggleCamera,
+    this.onOpenConnectionModal,
     required this.onManualMockCapture,
     required this.onToggleZenMode,
     required this.onToggleBeforeAfter,
@@ -102,10 +104,11 @@ class TopWorkspaceBar extends StatelessWidget {
                     ),
                     const SizedBox(width: 8),
 
-                    // Camera Connection Pill (Mock Toggle)
+                    // Camera Connection Pill (Tap for modal, Long-press to toggle)
                     InkWell(
                       key: const Key('btn_camera_connection_toggle'),
-                      onTap: onToggleCamera,
+                      onTap: onOpenConnectionModal ?? onToggleCamera,
+                      onLongPress: onToggleCamera,
                       borderRadius: BorderRadius.circular(4),
                       child: Container(
                         padding: const EdgeInsets.symmetric(
@@ -143,9 +146,13 @@ class TopWorkspaceBar extends StatelessWidget {
                             Text(
                               isConnected
                                   ? (isLandscapeOrTablet
-                                      ? 'Canon 6D Mock'
-                                      : 'Canon 6D')
-                                  : (isConnecting ? 'Connecting...' : 'Mock'),
+                                      ? cameraDriverName
+                                      : cameraDriverName.split('(').first.trim())
+                                  : (isConnecting
+                                      ? 'Connecting...'
+                                      : (isLandscapeOrTablet
+                                          ? 'Connect Camera'
+                                          : 'Offline')),
                               style: TextStyle(
                                 fontSize: 11,
                                 fontWeight: FontWeight.w600,

@@ -18,6 +18,7 @@ import android.widget.FrameLayout
 import android.widget.LinearLayout
 import android.widget.ProgressBar
 import android.widget.TextView
+import com.photoezi.photoe_zi.camera.CameraBridgeManager
 import io.flutter.embedding.android.FlutterActivity
 import io.flutter.embedding.engine.FlutterEngine
 import io.flutter.plugin.common.MethodChannel
@@ -27,9 +28,12 @@ class MainActivity : FlutterActivity() {
     private var activeDialog: Dialog? = null
     private var pendingResult: MethodChannel.Result? = null
     private var isCompleted: Boolean = false
+    private var cameraBridgeManager: CameraBridgeManager? = null
 
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
         super.configureFlutterEngine(flutterEngine)
+
+        cameraBridgeManager = CameraBridgeManager(this, flutterEngine.dartExecutor.binaryMessenger)
 
         MethodChannel(flutterEngine.dartExecutor.binaryMessenger, channelName)
             .setMethodCallHandler { call, result ->
@@ -251,4 +255,10 @@ class MainActivity : FlutterActivity() {
     }
 
     private fun nilResult(): MethodChannel.Result? = null
+
+    override fun onDestroy() {
+        cameraBridgeManager?.destroy()
+        cameraBridgeManager = null
+        super.onDestroy()
+    }
 }

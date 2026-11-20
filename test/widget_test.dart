@@ -7,8 +7,11 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:photoe_zi/core/constants/studio_theme.dart';
 import 'package:photoe_zi/core/database/app_database.dart';
 import 'package:photoe_zi/core/utils/exif_and_histogram_utils.dart';
+import 'package:photoe_zi/features/camera/data/camera_driver_manager.dart';
 import 'package:photoe_zi/features/camera/data/mock_camera_driver.dart';
 import 'package:photoe_zi/features/camera/domain/base_camera_driver.dart';
+import 'package:photoe_zi/features/camera/domain/camera_types.dart';
+import 'package:photoe_zi/features/camera/presentation/camera_connection_modal.dart';
 import 'package:photoe_zi/features/tether_view/presentation/tether_workspace_controller.dart';
 import 'package:photoe_zi/main.dart';
 
@@ -166,6 +169,111 @@ void main() {
 
       await db.close();
       driver.dispose();
+    });
+  });
+
+  group('Issue #4.1 & #4.2 — Native Camera Bridge & CameraDriverManager Tests',
+      () {
+    test(
+        'CameraDriverManager manages driver lifecycle, switching, and stream forwarding',
+        () async {
+      final mockDriver = MockCameraDriver(
+        captureInterval: const Duration(seconds: 10),
+      );
+      final manager = CameraDriverManager(initialDriver: mockDriver);
+
+      expect(manager.currentDriverId, 'mock');
+      expect(manager.driverName, contains('Canon EOS 6D (Mock Simulator)'));
+
+      final states = <CameraConnectionState>[];
+      final stateSub = manager.connectionStateStream.listen(states.add);
+
+      await manager.connect();
+      await Future<void>.delayed(const Duration(milliseconds: 300));
+      expect(states, contains(CameraConnectionState.connected));
+
+      // Switch to Canon USB
+      await manager.switchDriver('canon_usb', autoConnect: false);
+      expect(manager.currentDriverId, 'canon_usb');
+      expect(manager.driverName, contains('Canon EOS (Wired USB-OTG)'));
+      expect(manager.connectionType, CameraConnectionType.usb);
+
+      // Switch to Canon Wi-Fi
+      await manager.switchDriver('canon_wifi', autoConnect: false);
+      expect(manager.currentDriverId, 'canon_wifi');
+      expect(manager.driverName, contains('Canon EOS (Wi-Fi PTP/IP)'));
+      expect(manager.connectionType, CameraConnectionType.wifi);
+
+      // Switch back to Mock
+      await manager.switchDriver('mock', autoConnect: false);
+      expect(manager.currentDriverId, 'mock');
+
+      await stateSub.cancel();
+      manager.dispose();
+    });
+
+    testWidgets('CameraConnectionModal renders drivers and confirms selection',
+        (WidgetTester tester) async {
+      String? selectedDriver;
+      String? connectedIp;
+
+      await tester.pumpWidget(
+        MaterialApp(
+          theme: ThemeData.dark(),
+          home: Scaffold(
+            body: CameraConnectionModal(
+              activeDriverId: 'mock',
+              connectionState: CameraConnectionState.disconnected,
+              currentDriverName: 'Mock Camera Simulator',
+              onGetAvailableDrivers: () async => [
+                const CameraDriverInfo(
+                  id: 'canon_usb',
+                  name: 'Canon EOS (Wired USB-OTG)',
+                  type: CameraDriverType.usb,
+                  isAvailable: true,
+                ),
+                const CameraDriverInfo(
+                  id: 'canon_wifi',
+                  name: 'Canon EOS (Wi-Fi PTP/IP)',
+                  type: CameraDriverType.wifi,
+                  isAvailable: true,
+                ),
+                const CameraDriverInfo(
+                  id: 'mock',
+                  name: 'Mock Camera Simulator',
+                  type: CameraDriverType.mock,
+                  isAvailable: true,
+                ),
+              ],
+              onSelectAndConnect: (id, {ipAddress, port}) async {
+                selectedDriver = id;
+                connectedIp = ipAddress;
+              },
+              onDisconnect: () {},
+            ),
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      expect(find.text('Camera Connection & Tethering'), findsOneWidget);
+      expect(find.text('Canon EOS (Wired USB-OTG)'), findsOneWidget);
+      expect(find.text('USB Detected ✓'), findsOneWidget);
+      expect(find.text('Canon EOS (Wi-Fi PTP/IP)'), findsOneWidget);
+
+      // Select Canon Wi-Fi driver
+      await tester.tap(find.byKey(const Key('camera_driver_option_canon_wifi')));
+      await tester.pumpAndSettle();
+
+      // Verify Camera IP input is shown for Wi-Fi PTP/IP
+      expect(find.text('Camera IP'), findsOneWidget);
+
+      // Click Connect button
+      await tester.tap(find.byKey(const Key('btn_confirm_camera_connection')));
+      await tester.pump();
+
+      expect(selectedDriver, 'canon_wifi');
+      expect(connectedIp, '192.168.1.1');
     });
   });
 }

@@ -6,6 +6,7 @@ import WebKit
 @objc class AppDelegate: FlutterAppDelegate, FlutterImplicitEngineDelegate {
   private var oauthNavController: UINavigationController?
   private var pendingResult: FlutterResult?
+  private var cameraBridgeManager: CameraBridgeManager?
 
   override func application(
     _ application: UIApplication,
@@ -18,6 +19,7 @@ import WebKit
     GeneratedPluginRegistrant.register(with: engineBridge.pluginRegistry)
 
     let messenger = engineBridge.applicationRegistrar.messenger()
+    cameraBridgeManager = CameraBridgeManager(messenger: messenger)
     let channel = FlutterMethodChannel(name: "com.photoezi/oauth_popup", binaryMessenger: messenger)
 
     channel.setMethodCallHandler { [weak self] (call, result) in

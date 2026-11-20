@@ -8,6 +8,13 @@
 	<string>$(DEVELOPMENT_LANGUAGE)</string>
 	<key>CFBundleDisplayName</key>
 	<string>PhotoE-Zi</string>
+	<key>NSLocalNetworkUsageDescription</key>
+	<string>PhotoE-Zi connects to your Canon and Fujifilm cameras over Wi-Fi (PTP/IP) for instant tethered photo transfer.</string>
+	<key>NSBonjourServices</key>
+	<array>
+		<string>_ptp._tcp</string>
+		<string>_canon-ptp._tcp</string>
+	</array>
 	<key>NSAppTransportSecurity</key>
 	<dict>
 		<key>NSAllowsLocalNetworking</key>

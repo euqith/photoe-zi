@@ -6,6 +6,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:photoe_zi/core/constants/studio_theme.dart';
 import 'package:photoe_zi/core/database/app_database.dart';
 import 'package:photoe_zi/core/utils/exif_and_histogram_utils.dart';
+import 'package:photoe_zi/features/camera/presentation/camera_connection_modal.dart';
 import 'package:photoe_zi/features/cloud_sync/data/google_drive_cloud_sync_service.dart';
 import 'package:photoe_zi/features/cloud_sync/presentation/drive_sync_panel.dart';
 import 'package:photoe_zi/features/tether_view/presentation/tether_workspace_controller.dart';
@@ -101,6 +102,11 @@ class _TetherWorkspaceScreenState
                   syncedCount: syncedCount,
                   totalCount: allPhotos.length,
                   onToggleCamera: controller.toggleCameraConnection,
+                  onOpenConnectionModal: () => _showCameraConnectionModal(
+                    context,
+                    controller,
+                    sessionState,
+                  ),
                   onManualMockCapture: controller.triggerManualMockCapture,
                   onToggleZenMode: controller.toggleZenMode,
                   onToggleBeforeAfter: () => controller.setBeforeAfterPressed(
@@ -969,6 +975,30 @@ class _TetherWorkspaceScreenState
       }
     }
     return buf.toString();
+  }
+
+  Future<void> _showCameraConnectionModal(
+    BuildContext context,
+    TetherWorkspaceController controller,
+    TetherSessionState sessionState,
+  ) async {
+    await showDialog<void>(
+      context: context,
+      builder: (_) => CameraConnectionModal(
+        activeDriverId: controller.activeCameraDriverId,
+        connectionState: sessionState.cameraState,
+        currentDriverName: sessionState.cameraDriverName,
+        onGetAvailableDrivers: controller.getAvailableCameraDrivers,
+        onSelectAndConnect: (driverId, {ipAddress, port}) =>
+            controller.switchCameraDriver(
+          driverId,
+          ipAddress: ipAddress,
+          port: port,
+        ),
+        onDisconnect: controller.cameraDriver.disconnect,
+        onTriggerMockShot: controller.triggerManualMockCapture,
+      ),
+    );
   }
 
   Future<void> _showNewSessionDialog(

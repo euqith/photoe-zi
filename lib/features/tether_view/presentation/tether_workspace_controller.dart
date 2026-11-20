@@ -9,8 +9,10 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:path/path.dart' as p;
 import 'package:photoe_zi/core/database/app_database.dart';
 import 'package:photoe_zi/core/utils/exif_and_histogram_utils.dart';
+import 'package:photoe_zi/features/camera/data/camera_driver_manager.dart';
 import 'package:photoe_zi/features/camera/data/mock_camera_driver.dart';
 import 'package:photoe_zi/features/camera/domain/base_camera_driver.dart';
+import 'package:photoe_zi/features/camera/domain/camera_types.dart';
 import 'package:photoe_zi/features/cloud_sync/data/cloud_sync_service.dart';
 import 'package:photoe_zi/features/cloud_sync/data/google_drive_cloud_sync_service.dart';
 import 'package:photoe_zi/features/cloud_sync/data/google_oauth_config_manager.dart';
@@ -174,9 +176,9 @@ final appDatabaseProvider = Provider<AppDatabase>((ref) {
 });
 
 final cameraDriverProvider = Provider<BaseCameraDriver>((ref) {
-  final driver = MockCameraDriver();
-  ref.onDispose(driver.dispose);
-  return driver;
+  final manager = CameraDriverManager();
+  ref.onDispose(manager.dispose);
+  return manager;
 });
 
 final lutPresetManagerProvider = Provider<LutPresetManager>((ref) {
@@ -616,7 +618,49 @@ class TetherWorkspaceController extends StateNotifier<TetherSessionState> {
     final driver = cameraDriver;
     if (driver is MockCameraDriver) {
       await driver.triggerManualShot();
+    } else if (driver is CameraDriverManager) {
+      final active = driver.activeDriver;
+      if (active is MockCameraDriver) {
+        await active.triggerManualShot();
+      }
     }
+  }
+
+  Future<List<CameraDriverInfo>> getAvailableCameraDrivers() async {
+    final driver = cameraDriver;
+    if (driver is CameraDriverManager) {
+      return await driver.getAvailableDrivers();
+    }
+    return const [
+      CameraDriverInfo(
+        id: 'mock',
+        name: 'Mock Camera Simulator',
+        type: CameraDriverType.mock,
+        isAvailable: true,
+      ),
+    ];
+  }
+
+  Future<void> switchCameraDriver(
+    String driverId, {
+    String? ipAddress,
+    int? port,
+  }) async {
+    final driver = cameraDriver;
+    if (driver is CameraDriverManager) {
+      await driver.switchDriver(driverId, ipAddress: ipAddress, port: port);
+      if (mounted) {
+        state = state.copyWith(cameraDriverName: driver.driverName);
+      }
+    }
+  }
+
+  String get activeCameraDriverId {
+    final driver = cameraDriver;
+    if (driver is CameraDriverManager) {
+      return driver.currentDriverId;
+    }
+    return 'mock';
   }
 
   void selectPhoto(String photoId, {required bool isLatestPhoto}) {
