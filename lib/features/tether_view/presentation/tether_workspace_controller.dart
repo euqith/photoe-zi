@@ -396,6 +396,31 @@ class TetherWorkspaceController extends StateNotifier<TetherSessionState> {
 
   // --- Google Drive Cloud Sync Controls (Sprint 3 & Fix #3.5) ---
 
+  Future<void> _ensureRealGoogleDriveFolderAfterSignIn() async {
+    final currentFolder = state.driveFolderId;
+    if (cloudSync.currentUser?.hasRealAccessToken == true &&
+        (currentFolder == null || currentFolder.startsWith('1GDrive_'))) {
+      try {
+        final realFolderId =
+            await cloudSync.createSessionFolder(state.activeSessionName);
+        final shareLink =
+            await cloudSync.generateShareableFolderLink(realFolderId);
+        final folderDisplay = cloudSync.getSessionFolderPathDisplay(
+          realFolderId,
+          state.activeSessionName,
+        );
+        await db.updateSessionDriveFolder(state.activeSessionId, realFolderId);
+        if (mounted) {
+          state = state.copyWith(
+            driveFolderId: realFolderId,
+            sessionFolderPath: folderDisplay,
+            shareableFolderUrl: shareLink,
+          );
+        }
+      } catch (_) {}
+    }
+  }
+
   Future<bool> signInGoogleWithAccessToken({
     required String accessToken,
     String? email,
@@ -413,6 +438,9 @@ class TetherWorkspaceController extends StateNotifier<TetherSessionState> {
         googleAuthError: cloudSync.lastErrorMessage,
         clearGoogleAuthError: ok,
       );
+    }
+    if (ok) {
+      await _ensureRealGoogleDriveFolderAfterSignIn();
     }
     return ok;
   }
@@ -452,6 +480,9 @@ class TetherWorkspaceController extends StateNotifier<TetherSessionState> {
         clearGoogleAuthError: ok,
       );
     }
+    if (ok) {
+      await _ensureRealGoogleDriveFolderAfterSignIn();
+    }
     return ok;
   }
 
@@ -473,6 +504,9 @@ class TetherWorkspaceController extends StateNotifier<TetherSessionState> {
         googleAuthError: cloudSync.lastErrorMessage,
         clearGoogleAuthError: ok,
       );
+    }
+    if (ok) {
+      await _ensureRealGoogleDriveFolderAfterSignIn();
     }
     return ok;
   }
@@ -547,6 +581,7 @@ class TetherWorkspaceController extends StateNotifier<TetherSessionState> {
   }
 
   Future<UploadAllSummary> uploadAllPhotosForCurrentSession() async {
+    await _ensureRealGoogleDriveFolderAfterSignIn();
     final folderId = state.driveFolderId ?? 'TetherApp_Root';
     final summary = await cloudSync.uploadAllPhotos(
       sessionId: state.activeSessionId,

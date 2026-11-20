@@ -758,5 +758,108 @@ void main() {
 
       serviceWithRemote.dispose();
     });
+
+    test(
+        'uploadAllPhotos does NOT skip photos that had local demo completed records if they do not exist on real Google Drive',
+        () async {
+      await db.createSession(
+        SessionsCompanion.insert(
+          id: 'session_demo_to_real',
+          name: 'Session_Demo_Real',
+          createdAt: DateTime.now(),
+        ),
+      );
+
+      final p1 = await createSampleJpegFile('IMG_4001.JPG');
+      await db.upsertPhoto(
+        PhotosCompanion.insert(
+          id: 'p_4001',
+          sessionId: 'session_demo_to_real',
+          fileName: 'IMG_4001.JPG',
+          fullResPath: Value(p1),
+          capturedAt: DateTime.now(),
+        ),
+      );
+
+      // Simulate an old demo upload item with status completed and a fake demo remoteFileId
+      await db.enqueueUpload(
+        UploadQueueCompanion.insert(
+          id: 'uq_p_4001',
+          photoId: 'p_4001',
+          variant: 'bakedLut',
+          status: const Value('completed'),
+          remoteFileId:
+              const Value('1GDrive_TetherApp_2026-11-20_Studio_A_Edited_p_4001'),
+          progress: const Value(1.0),
+        ),
+      );
+
+      final mockHttp = MockClient((http.Request request) async {
+        if (request.url.path.contains('/drive/v3/about')) {
+          return http.Response(
+            jsonEncode({
+              'user': {
+                'emailAddress': 'photographer@gmail.com',
+                'displayName': 'Pro Photographer',
+              }
+            }),
+            200,
+          );
+        }
+        if (request.url.path == '/drive/v3/files' && request.method == 'GET') {
+          // Google Drive folder is actually empty!
+          return http.Response(
+            jsonEncode({'files': []}),
+            200,
+          );
+        }
+        if (request.url.path.contains('/upload/drive/v3/files')) {
+          return http.Response(
+            'OK',
+            200,
+            headers: {
+              'location':
+                  'https://www.googleapis.com/upload/drive/v3/session_upload_4001'
+            },
+          );
+        }
+        if (request.url.path.contains('session_upload_4001')) {
+          return http.Response(
+            jsonEncode({'id': 'gdrive_real_id_4001'}),
+            200,
+          );
+        }
+        return http.Response('OK', 200);
+      });
+
+      final service = GoogleDriveCloudSyncService(
+        db: db,
+        lutManager: lutManager,
+        lutBaker: const LutBakerService(),
+        httpClient: mockHttp,
+      );
+
+      await service.signIn(
+        email: 'photographer@gmail.com',
+        accessToken: 'ya29.real_token_for_demo_transition',
+      );
+
+      final summary = await service.uploadAllPhotos(
+        sessionId: 'session_demo_to_real',
+        driveFolderId: '1RealDriveFolderId4001',
+        variant: UploadVariant.bakedLut,
+      );
+
+      // Must NOT be falsely skipped as existing!
+      expect(summary.totalPhotos, 1);
+      expect(summary.skippedCount, 0);
+      expect(summary.enqueuedCount, 1);
+
+      await Future<void>.delayed(const Duration(milliseconds: 150));
+      final items = await db.getUploadQueueForPhoto('p_4001');
+      expect(items.single.remoteFileId, 'gdrive_real_id_4001');
+
+      service.dispose();
+    });
   });
 }

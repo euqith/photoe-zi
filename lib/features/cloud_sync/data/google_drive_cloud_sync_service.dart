@@ -37,7 +37,8 @@ class GoogleDriveCloudSyncService implements CloudSyncService {
   final Map<String, String> _sessionFolderNames = {};
   final Map<String, String> _subfolderCache = {};
   final Set<String> _publicSharedFolders = {};
-  final Map<String, Set<String>> _remoteFilesByFolder = {};
+  final Map<String, Set<String>> _realUploadedFilesByFolder = {};
+  final Map<String, Set<String>> _demoUploadedFilesByFolder = {};
 
   GoogleDriveCloudSyncService({
     required this.db,
@@ -571,15 +572,22 @@ class GoogleDriveCloudSyncService implements CloudSyncService {
     final cleanId = CloudSyncService.extractDriveFolderId(driveFolderId);
     final result = <String>{};
 
+    final user = _currentUser;
+    final bool isRealAuth = user != null && user.hasRealAccessToken;
+
     // 1. Include in-memory tracked files for this folder
-    if (_remoteFilesByFolder.containsKey(cleanId)) {
-      result.addAll(_remoteFilesByFolder[cleanId]!);
+    if (isRealAuth) {
+      if (_realUploadedFilesByFolder.containsKey(cleanId)) {
+        result.addAll(_realUploadedFilesByFolder[cleanId]!);
+      }
+    } else {
+      if (_demoUploadedFilesByFolder.containsKey(cleanId)) {
+        result.addAll(_demoUploadedFilesByFolder[cleanId]!);
+      }
     }
 
     // 2. Real Google Drive API v3 files.list query
-    final user = _currentUser;
-    if (user != null &&
-        user.hasRealAccessToken &&
+    if (isRealAuth &&
         !_isOffline &&
         cleanId.isNotEmpty &&
         !cleanId.startsWith('1GDrive_')) {
@@ -675,8 +683,24 @@ class GoogleDriveCloudSyncService implements CloudSyncService {
       );
     }
 
+    final user = _currentUser;
+    final bool isRealAuth = user != null && user.hasRealAccessToken;
+    String targetFolderId = driveFolderId;
+
+    // If authenticated with real Google account, ensure we have a real Drive folder
+    if (isRealAuth &&
+        !_isOffline &&
+        (targetFolderId.isEmpty || targetFolderId.startsWith('1GDrive_'))) {
+      try {
+        final session = await db.getSessionById(sessionId);
+        final sessionName = session?.name ?? 'Studio_Session';
+        targetFolderId = await createSessionFolder(sessionName);
+        await db.updateSessionDriveFolder(sessionId, targetFolderId);
+      } catch (_) {}
+    }
+
     final cleanFolderId =
-        CloudSyncService.extractDriveFolderId(driveFolderId);
+        CloudSyncService.extractDriveFolderId(targetFolderId);
 
     // 1. Check existing remote files in Drive folder
     final remoteFileNames =
@@ -694,21 +718,41 @@ class GoogleDriveCloudSyncService implements CloudSyncService {
 
     for (final photo in photos) {
       final queueItem = queueByPhotoId[photo.id];
-      final bool isAlreadyCompleted =
-          queueItem != null && queueItem.status == 'completed';
       final bool isInFlight = queueItem != null &&
           (queueItem.status == 'pending' ||
               queueItem.status == 'bakingLut' ||
               queueItem.status == 'uploading');
-      final bool existsOnDrive = remoteFileNames.contains(photo.fileName);
 
-      if (isAlreadyCompleted || isInFlight || existsOnDrive) {
+      bool isAlreadyOnDrive = false;
+
+      if (isRealAuth && !_isOffline) {
+        // When connected with a real Google account, the remote Drive folder is the authoritative truth.
+        // If a photo does not exist in remoteFileNames, it was not yet uploaded to this Drive folder
+        // (even if local SQLite had a previous demo/mock upload record marked 'completed').
+        if (remoteFileNames.contains(photo.fileName)) {
+          isAlreadyOnDrive = true;
+        } else if (cleanFolderId.isEmpty ||
+            cleanFolderId.startsWith('1GDrive_')) {
+          // If remote check couldn't be performed, only consider completed if remoteFileId is a real Google ID
+          isAlreadyOnDrive = queueItem != null &&
+              queueItem.status == 'completed' &&
+              queueItem.remoteFileId != null &&
+              !queueItem.remoteFileId!.startsWith('1GDrive_') &&
+              !queueItem.remoteFileId!.startsWith('session_root_');
+        }
+      } else {
+        // Demo mode or offline fallback check
+        isAlreadyOnDrive = remoteFileNames.contains(photo.fileName) ||
+            (queueItem != null && queueItem.status == 'completed');
+      }
+
+      if (isAlreadyOnDrive || isInFlight) {
         skippedCount++;
         skippedPhotoNames.add(photo.fileName);
       } else {
         await enqueuePhoto(
           localPhotoId: photo.id,
-          driveFolderId: driveFolderId,
+          driveFolderId: targetFolderId,
           variant: variant,
           activeLutId: activeLutId,
         );
@@ -1008,7 +1052,7 @@ class GoogleDriveCloudSyncService implements CloudSyncService {
         _setError(null);
         final cleanFolder =
             CloudSyncService.extractDriveFolderId(resolvedDriveFolderId);
-        _remoteFilesByFolder
+        _realUploadedFilesByFolder
             .putIfAbsent(cleanFolder, () => <String>{})
             .add(photo.fileName);
 
@@ -1058,7 +1102,7 @@ class GoogleDriveCloudSyncService implements CloudSyncService {
 
       final cleanFolder =
           CloudSyncService.extractDriveFolderId(resolvedDriveFolderId);
-      _remoteFilesByFolder
+      _demoUploadedFilesByFolder
           .putIfAbsent(cleanFolder, () => <String>{})
           .add(photo.fileName);
 
