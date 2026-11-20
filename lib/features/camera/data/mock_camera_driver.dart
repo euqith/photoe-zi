@@ -344,6 +344,11 @@ class MockCameraDriver implements BaseCameraDriver {
     return filePath;
   }
 
+  @override
+  Future<int> rescanCameraPhotos() async {
+    return 0;
+  }
+
   void dispose() {
     _captureTimer?.cancel();
     _connectionController.close();

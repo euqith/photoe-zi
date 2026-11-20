@@ -414,6 +414,43 @@ class TetherWorkspaceController extends StateNotifier<TetherSessionState> {
     } catch (_) {}
   }
 
+  Future<int> resetSessionAndRescanCamera() async {
+    state = state.copyWith(
+      inMemoryPreviews: {},
+      selectedPhotoId: null,
+    );
+    try {
+      final previewDir = Directory(
+        p.join(Directory.systemTemp.path, 'photoe_zi_previews'),
+      );
+      if (await previewDir.exists()) {
+        await previewDir.delete(recursive: true);
+      }
+    } catch (_) {}
+
+    // Clear current session photos in DB to remove stale / black images
+    await (db.delete(db.photos)
+          ..where((tbl) => tbl.sessionId.equals(state.activeSessionId)))
+        .go();
+
+    // Trigger native camera rescan
+    final count = await cameraDriver.rescanCameraPhotos();
+
+    // Allow time for incoming native thumbnail and download events to stream in
+    if (count > 0) {
+      await Future.delayed(const Duration(milliseconds: 600));
+    }
+
+    // Reload photos for active session
+    final freshPhotos = await db.getPhotosForSession(state.activeSessionId);
+    if (mounted) {
+      state = state.copyWith(
+        selectedPhotoId: freshPhotos.isNotEmpty ? freshPhotos.last.id : null,
+      );
+    }
+    return count;
+  }
+
   // --- Google Drive Cloud Sync Controls (Sprint 3 & Fix #3.5) ---
 
   Future<void> _ensureRealGoogleDriveFolderAfterSignIn() async {

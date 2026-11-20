@@ -130,6 +130,9 @@ class CameraBridgeManager: NSObject, FlutterStreamHandler, ICDeviceBrowserDelega
     case "downloadFullResolution":
       result(FlutterError(code: "NOT_IMPLEMENTED", message: "Download via tethering bridge", details: nil))
 
+    case "rescanCameraPhotos":
+      rescanCameraPhotos(result: result)
+
     case "getNetworkStatus":
       result([
         "isWifiActive": true,
@@ -211,79 +214,112 @@ class CameraBridgeManager: NSObject, FlutterStreamHandler, ICDeviceBrowserDelega
   func cameraDevice(_ camera: ICCameraDevice, didAdd items: [ICCameraItem]) {
     for item in items {
       guard let file = item as? ICCameraFile else { continue }
-      let photoId = "usb_\(file.name ?? "\(Date().timeIntervalSince1970)")"
-      let fileName = file.name ?? "IMG_\(Int.random(in: 1000...9999)).JPG"
-      let capturedAt = Int(file.creationDate?.timeIntervalSince1970 ?? Date().timeIntervalSince1970) * 1000
+      processCameraFile(file: file, camera: camera)
+    }
+  }
 
-      // 1. Request embedded thumbnail immediately
-      file.requestThumbnailData(options: nil) { [weak self] (thumbnailData, thumbError) in
-        guard let self = self else { return }
-        var thumbBytes: FlutterStandardTypedData? = nil
-        if let data = thumbnailData, !data.isEmpty {
-          thumbBytes = FlutterStandardTypedData(bytes: data)
-        }
+  private func processCameraFile(file: ICCameraFile, camera: ICCameraDevice) {
+    let photoId = "usb_\(file.name ?? "\(Date().timeIntervalSince1970)")"
+    let fileName = file.name ?? "IMG_\(Int.random(in: 1000...9999)).JPG"
+    let capturedAt = Int(file.creationDate?.timeIntervalSince1970 ?? Date().timeIntervalSince1970) * 1000
 
-        // If thumbnail is available immediately, dispatch stage 1
-        if let thumbBytes = thumbBytes {
-          let stage1Payload: [String: Any] = [
-            "id": photoId,
-            "fileName": fileName,
-            "previewBytes": thumbBytes,
-            "fullResLocalPath": NSNull(),
-            "capturedAt": capturedAt,
-            "exif": [
-              "cameraModel": camera.name ?? "Canon EOS 6D (USB)",
-              "aperture": "f/2.8",
-              "shutterSpeed": "1/160s",
-              "iso": 200,
-              "focalLength": "50mm"
-            ]
-          ]
-          self.sendEvent(type: "photoAdded", data: stage1Payload)
-        }
-
-        // 2. Download full resolution file to local app cache directory
-        let cacheDir = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask).first ?? FileManager.default.temporaryDirectory
-        let destDir = cacheDir.appendingPathComponent("photoe_zi_tether", isDirectory: true)
-        try? FileManager.default.createDirectory(at: destDir, withIntermediateDirectories: true, attributes: nil)
-
-        let downloadOptions: [ICDownloadOption: Any] = [
-          .downloadsDirectoryURL: destDir,
-          .saveAsFilename: fileName
-        ]
-
-        _ = file.requestDownload(options: downloadOptions) { [weak self] (savedFilename, downloadError) in
-          guard let self = self else { return }
-          var fullResPath: String? = nil
-          if let savedFilename = savedFilename {
-            fullResPath = destDir.appendingPathComponent(savedFilename).path
-          } else {
-            fullResPath = destDir.appendingPathComponent(fileName).path
-          }
-
-          // If thumbnail was nil, load image data from the saved file on disk
-          if thumbBytes == nil, let fullResPath = fullResPath, let fileData = try? Data(contentsOf: URL(fileURLWithPath: fullResPath)) {
-            thumbBytes = FlutterStandardTypedData(bytes: fileData)
-          }
-
-          let stage2Payload: [String: Any] = [
-            "id": photoId,
-            "fileName": fileName,
-            "previewBytes": (thumbBytes != nil) ? thumbBytes! : NSNull(),
-            "fullResLocalPath": (fullResPath != nil) ? fullResPath! : NSNull(),
-            "capturedAt": capturedAt,
-            "exif": [
-              "cameraModel": camera.name ?? "Canon EOS 6D (USB)",
-              "aperture": "f/2.8",
-              "shutterSpeed": "1/160s",
-              "iso": 200,
-              "focalLength": "50mm"
-            ]
-          ]
-          self.sendEvent(type: "photoAdded", data: stage2Payload)
+    // 1. Request embedded thumbnail immediately
+    file.requestThumbnailData(options: nil) { [weak self] (thumbnailData, thumbError) in
+      guard let self = self else { return }
+      var thumbBytes: FlutterStandardTypedData? = nil
+      if let data = thumbnailData, !data.isEmpty {
+        thumbBytes = FlutterStandardTypedData(bytes: data)
+      } else if let cgThumb = file.thumbnailIfAvailable {
+        let rep = NSBitmapImageRep(cgImage: cgThumb)
+        if let jpegData = rep.representation(using: .jpeg, properties: [:]) {
+          thumbBytes = FlutterStandardTypedData(bytes: jpegData)
         }
       }
+
+      // If thumbnail is available immediately, dispatch stage 1
+      if let thumbBytes = thumbBytes {
+        let stage1Payload: [String: Any] = [
+          "id": photoId,
+          "fileName": fileName,
+          "previewBytes": thumbBytes,
+          "fullResLocalPath": NSNull(),
+          "capturedAt": capturedAt,
+          "exif": [
+            "cameraModel": camera.name ?? "Canon EOS 6D (USB)",
+            "aperture": "f/2.8",
+            "shutterSpeed": "1/160s",
+            "iso": 200,
+            "focalLength": "50mm"
+          ]
+        ]
+        self.sendEvent(type: "photoAdded", data: stage1Payload)
+      }
+
+      // 2. Download full resolution file to local app cache directory
+      let cacheDir = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask).first ?? FileManager.default.temporaryDirectory
+      let destDir = cacheDir.appendingPathComponent("photoe_zi_tether", isDirectory: true)
+      try? FileManager.default.createDirectory(at: destDir, withIntermediateDirectories: true, attributes: nil)
+
+      let downloadOptions: [ICDownloadOption: Any] = [
+        .downloadsDirectoryURL: destDir,
+        .saveAsFilename: fileName
+      ]
+
+      _ = file.requestDownload(options: downloadOptions) { [weak self] (savedFilename, downloadError) in
+        guard let self = self else { return }
+        var fullResPath: String? = nil
+        if let savedFilename = savedFilename {
+          fullResPath = destDir.appendingPathComponent(savedFilename).path
+        } else {
+          fullResPath = destDir.appendingPathComponent(fileName).path
+        }
+
+        // If thumbnail was nil, load image data from the saved file on disk
+        if thumbBytes == nil, let fullResPath = fullResPath, let fileData = try? Data(contentsOf: URL(fileURLWithPath: fullResPath)) {
+          thumbBytes = FlutterStandardTypedData(bytes: fileData)
+        }
+
+        let stage2Payload: [String: Any] = [
+          "id": photoId,
+          "fileName": fileName,
+          "previewBytes": (thumbBytes != nil) ? thumbBytes! : NSNull(),
+          "fullResLocalPath": (fullResPath != nil) ? fullResPath! : NSNull(),
+          "capturedAt": capturedAt,
+          "exif": [
+            "cameraModel": camera.name ?? "Canon EOS 6D (USB)",
+            "aperture": "f/2.8",
+            "shutterSpeed": "1/160s",
+            "iso": 200,
+            "focalLength": "50mm"
+          ]
+        ]
+        self.sendEvent(type: "photoAdded", data: stage2Payload)
+      }
     }
+  }
+
+  private func rescanCameraPhotos(result: @escaping FlutterResult) {
+    guard let camera = connectedCameraDevice else {
+      result(0)
+      return
+    }
+    let allItems = (camera.mediaFiles ?? []) + (camera.contents ?? [])
+    var uniqueFiles: [ICCameraFile] = []
+    var seenNames = Set<String>()
+    for item in allItems {
+      if let file = item as? ICCameraFile, let name = file.name, !seenNames.contains(name) {
+        seenNames.insert(name)
+        uniqueFiles.append(file)
+      }
+    }
+    if uniqueFiles.isEmpty {
+      result(0)
+      return
+    }
+    for file in uniqueFiles {
+      processCameraFile(file: file, camera: camera)
+    }
+    result(uniqueFiles.count)
   }
 
   func cameraDevice(_ camera: ICCameraDevice, didRemove items: [ICCameraItem]) {}

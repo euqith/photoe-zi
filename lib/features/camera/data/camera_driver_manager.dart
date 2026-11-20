@@ -120,6 +120,11 @@ class CameraDriverManager implements BaseCameraDriver {
     return await _activeDriver.downloadFullResolution(photoId, targetDir);
   }
 
+  @override
+  Future<int> rescanCameraPhotos() async {
+    return await _activeDriver.rescanCameraPhotos();
+  }
+
   void dispose() {
     _connSub?.cancel();
     _photoSub?.cancel();

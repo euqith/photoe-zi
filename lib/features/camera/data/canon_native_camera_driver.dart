@@ -192,6 +192,17 @@ class CanonNativeCameraDriver implements BaseCameraDriver {
     }
   }
 
+  @override
+  Future<int> rescanCameraPhotos() async {
+    try {
+      final count =
+          await _methodChannel.invokeMethod<int>('rescanCameraPhotos');
+      return count ?? 0;
+    } catch (_) {
+      return 0;
+    }
+  }
+
   static Future<List<CameraDriverInfo>> getAvailableDrivers() async {
     try {
       final result = await _methodChannel

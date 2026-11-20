@@ -21,6 +21,7 @@ class TopWorkspaceBar extends StatelessWidget {
   final VoidCallback onShowSessionDialog;
   final VoidCallback onShowQrModal;
   final VoidCallback? onOpenDriveSettings;
+  final VoidCallback? onResetCamera;
 
   const TopWorkspaceBar({
     super.key,
@@ -42,6 +43,7 @@ class TopWorkspaceBar extends StatelessWidget {
     required this.onShowSessionDialog,
     required this.onShowQrModal,
     this.onOpenDriveSettings,
+    this.onResetCamera,
   });
 
   @override
@@ -230,6 +232,45 @@ class TopWorkspaceBar extends StatelessWidget {
                         ),
                       ),
                     ),
+                    if (onResetCamera != null) ...[
+                      const SizedBox(width: 6),
+                      // Reset and rescan camera cache
+                      InkWell(
+                        key: const Key('btn_reset_camera_cache'),
+                        onTap: onResetCamera,
+                        borderRadius: BorderRadius.circular(4),
+                        child: Container(
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 8,
+                            vertical: 4,
+                          ),
+                          decoration: BoxDecoration(
+                            color: StudioColors.panelElevated,
+                            borderRadius: BorderRadius.circular(4),
+                            border: Border.all(color: StudioColors.panelBorder),
+                          ),
+                          child: const Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              Icon(
+                                Icons.refresh_rounded,
+                                size: 13,
+                                color: StudioColors.accentAmber,
+                              ),
+                              SizedBox(width: 4),
+                              Text(
+                                'Reset & Sync Camera',
+                                style: TextStyle(
+                                  fontSize: 11,
+                                  fontWeight: FontWeight.w600,
+                                  color: StudioColors.accentAmber,
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ),
+                    ],
                   ],
                 ),
               ),

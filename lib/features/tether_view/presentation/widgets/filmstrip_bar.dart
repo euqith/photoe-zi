@@ -19,6 +19,7 @@ class FilmstripBar extends StatefulWidget {
   final VoidCallback onToggleLockLatest;
   final VoidCallback onToggleOrientation;
   final void Function(String photoId, bool isLatest) onSelectPhoto;
+  final VoidCallback? onResetCamera;
 
   const FilmstripBar({
     super.key,
@@ -34,6 +35,7 @@ class FilmstripBar extends StatefulWidget {
     required this.onToggleLockLatest,
     required this.onToggleOrientation,
     required this.onSelectPhoto,
+    this.onResetCamera,
   });
 
   @override
@@ -199,6 +201,44 @@ class _FilmstripBarState extends State<FilmstripBar> {
                         ),
                       ),
                     ),
+                    if (widget.onResetCamera != null) ...[
+                      const SizedBox(width: 6),
+                      InkWell(
+                        key: const Key('btn_filmstrip_reset_camera'),
+                        onTap: widget.onResetCamera,
+                        borderRadius: BorderRadius.circular(3),
+                        child: Container(
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 6,
+                            vertical: 3,
+                          ),
+                          decoration: BoxDecoration(
+                            color: StudioColors.canvasBackground,
+                            borderRadius: BorderRadius.circular(3),
+                            border: Border.all(color: StudioColors.panelBorder),
+                          ),
+                          child: const Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              Icon(
+                                Icons.refresh_rounded,
+                                size: 11,
+                                color: StudioColors.textSecondary,
+                              ),
+                              SizedBox(width: 3),
+                              Text(
+                                'Reset',
+                                style: TextStyle(
+                                  fontSize: 10,
+                                  fontWeight: FontWeight.w500,
+                                  color: StudioColors.textSecondary,
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ),
+                    ],
                     const SizedBox(width: 6),
                     IconButton(
                       tooltip: 'Toggle Vertical/Horizontal Filmstrip',

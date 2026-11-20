@@ -50,5 +50,6 @@ abstract class BaseCameraDriver {
   Future<bool> connect({String? ipAddress, int? port});
   Future<void> disconnect();
   Future<String> downloadFullResolution(String photoId, String targetDir);
+  Future<int> rescanCameraPhotos() async => 0;
 }
 

@@ -120,6 +120,7 @@ class _TetherWorkspaceScreenState
                     controller,
                     sessionState,
                   ),
+                  onResetCamera: () => _handleResetCamera(context, controller),
                   onShowQrModal: () async {
                     final shareUrl =
                         await controller.prepareShareableSessionLink();
@@ -217,6 +218,7 @@ class _TetherWorkspaceScreenState
             onToggleOrientation: controller.toggleFilmstripOrientation,
             onSelectPhoto: (photoId, isLatest) =>
                 controller.selectPhoto(photoId, isLatestPhoto: isLatest),
+            onResetCamera: () => _handleResetCamera(context, controller),
           ),
 
         // Main Photo Canvas + Bottom Filmstrip (~75% dominant workspace)
@@ -271,6 +273,7 @@ class _TetherWorkspaceScreenState
                   onToggleOrientation: controller.toggleFilmstripOrientation,
                   onSelectPhoto: (photoId, isLatest) =>
                       controller.selectPhoto(photoId, isLatestPhoto: isLatest),
+                  onResetCamera: () => _handleResetCamera(context, controller),
                 ),
             ],
           ),
@@ -416,6 +419,7 @@ class _TetherWorkspaceScreenState
               onToggleOrientation: controller.toggleFilmstripOrientation,
               onSelectPhoto: (photoId, isLatest) =>
                   controller.selectPhoto(photoId, isLatestPhoto: isLatest),
+              onResetCamera: () => _handleResetCamera(context, controller),
             ),
 
             // Space reserved for collapsed DraggableScrollableSheet trigger tabs
@@ -999,6 +1003,80 @@ class _TetherWorkspaceScreenState
         onTriggerMockShot: controller.triggerManualMockCapture,
       ),
     );
+  }
+
+  Future<void> _handleResetCamera(
+    BuildContext context,
+    TetherWorkspaceController controller,
+  ) async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: StudioColors.panelSurface,
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(12),
+          side: const BorderSide(color: StudioColors.panelBorder),
+        ),
+        title: const Text(
+          'Reset & Sync Camera Cache',
+          style: TextStyle(
+            color: StudioColors.textPrimary,
+            fontSize: 15,
+            fontWeight: FontWeight.bold,
+          ),
+        ),
+        content: const Text(
+          'This will purge local cached previews for this session and re-scan actual photos directly from the connected camera storage.\n\nOnly actual photos residing on the camera will be displayed.',
+          style: TextStyle(
+            color: StudioColors.textSecondary,
+            fontSize: 13,
+            height: 1.4,
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(ctx).pop(false),
+            child: const Text(
+              'Cancel',
+              style: TextStyle(color: StudioColors.textMuted),
+            ),
+          ),
+          ElevatedButton(
+            style: ElevatedButton.styleFrom(
+              backgroundColor: StudioColors.accentAmber,
+              foregroundColor: Colors.black,
+            ),
+            onPressed: () => Navigator.of(ctx).pop(true),
+            child: const Text(
+              'Reset Cache',
+              style: TextStyle(fontWeight: FontWeight.bold),
+            ),
+          ),
+        ],
+      ),
+    );
+
+    if (confirmed == true && context.mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Purging cache & scanning camera storage...'),
+          duration: Duration(seconds: 1),
+        ),
+      );
+      final count = await controller.resetSessionAndRescanCamera();
+      if (context.mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(
+              count > 0
+                  ? 'Done! Synced $count photos from camera.'
+                  : 'Done. No photos currently detected on camera.',
+            ),
+            backgroundColor: StudioColors.statusSuccess,
+          ),
+        );
+      }
+    }
   }
 
   Future<void> _showNewSessionDialog(

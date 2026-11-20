@@ -167,6 +167,10 @@ class CameraBridgeManager(
                 result.success(dualNetworkManager.getNetworkStatus())
             }
 
+            "rescanCameraPhotos" -> {
+                result.success(0)
+            }
+
             "enableCellularSync" -> {
                 dualNetworkManager.enableCellularRouting()
                 result.success(true)
