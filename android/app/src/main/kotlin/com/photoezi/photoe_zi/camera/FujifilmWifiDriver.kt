@@ -49,23 +49,34 @@ class FujifilmWifiDriver(
             cmdIn = socket.getInputStream()
             cmdOut = socket.getOutputStream()
 
-            // 1. Send Init Command Request for Fujifilm
-            // Packet layout: Length (4B), Type = 1 (Init_Command_Request, 4B), GUID (16B), Friendly Name (UTF-16LE null terminated), Version (4B)
-            val guid = ByteArray(16) { (0..255).random().toByte() }
-            val clientName = "PhotoE-Zi\u0000".toByteArray(Charsets.UTF_16LE)
-            val packetLen = 4 + 4 + 16 + clientName.size + 4 // version (4B)
-            val buffer = ByteBuffer.allocate(packetLen).order(ByteOrder.LITTLE_ENDIAN)
-            buffer.putInt(packetLen)
+            // 1. Send Init Command Request for Fujifilm: EXACTLY 40 BYTES
+            // [0..3]: Length (40 LE)
+            // [4..7]: Type (1 LE, PTPIP_INIT_COMMAND_REQ)
+            // [8..23]: GUID (16 bytes)
+            // [24..39]: Device Name UTF-16LE null-terminated (16 bytes, padded with zeros)
+            val packet = ByteArray(40)
+            val buffer = ByteBuffer.wrap(packet).order(ByteOrder.LITTLE_ENDIAN)
+            buffer.putInt(40)
             buffer.putInt(0x00000001) // PTPIP_INIT_COMMAND_REQ
-            buffer.put(guid)
-            buffer.put(clientName)
-            buffer.putInt(0x00010000) // PTP Version 1.0
 
-            cmdOut?.write(buffer.array())
+            val guid = ByteArray(16) { (0..255).random().toByte() }
+            buffer.put(guid)
+
+            val nameBytes = "PhotoEZ\u0000".toByteArray(Charsets.UTF_16LE)
+            val nameLen = minOf(nameBytes.size, 16)
+            System.arraycopy(nameBytes, 0, packet, 24, nameLen)
+
+            val txHex = packet.joinToString(" ") { String.format("%02X", it) }
+            println("[PtpIp] TX InitCommandRequest (40 bytes): $txHex")
+
+            cmdOut?.write(packet)
             cmdOut?.flush()
 
             // 2. Wait for Init Command Ack
             val ackHeader = readExact(cmdIn!!, 8) ?: throw Exception("Timeout or EOF waiting for InitCommandAck")
+            val rxHex = ackHeader.joinToString(" ") { String.format("%02X", it) }
+            println("[PtpIp] RX InitCommand Ack Header (8 bytes): $rxHex")
+
             val ackBuf = ByteBuffer.wrap(ackHeader).order(ByteOrder.LITTLE_ENDIAN)
             val ackLen = ackBuf.int
             val ackType = ackBuf.int
@@ -75,6 +86,8 @@ class FujifilmWifiDriver(
             }
             if (ackLen > 8) {
                 val ackBody = readExact(cmdIn!!, ackLen - 8) ?: throw Exception("Timeout reading Ack body")
+                val bodyHex = ackBody.joinToString(" ") { String.format("%02X", it) }
+                println("[PtpIp] RX InitCommand Ack Body (${ackBody.size} bytes): $bodyHex")
                 if (ackBody.size >= 4) {
                     val bodyBuf = ByteBuffer.wrap(ackBody).order(ByteOrder.LITTLE_ENDIAN)
                     connectionNumber = bodyBuf.int
@@ -92,14 +105,23 @@ class FujifilmWifiDriver(
             isListening = true
 
             // 5. Update State: HANYA ubah state koneksi menjadi connected setelah langkah 1 sampai 4 berhasil
+            println("[PtpIp] Handshake completed successfully! Connected.")
             notifyState("connected")
 
             startEventListener()
             true
         } catch (e: Exception) {
+            println("[PtpIp] Error during handshake: ${e.message}")
             disconnect()
             notifyState("error")
             false
+        } finally {
+            if (!isConnected) {
+                try { cmdSocket?.close() } catch (_: Exception) {}
+                try { eventSocket?.close() } catch (_: Exception) {}
+                cmdSocket = null
+                eventSocket = null
+            }
         }
     }
 

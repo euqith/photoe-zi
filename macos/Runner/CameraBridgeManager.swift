@@ -439,33 +439,35 @@ class CameraBridgeManager: NSObject, FlutterStreamHandler, ICDeviceBrowserDelega
 
   private func performPtpIpHandshake(connection: NWConnection, finish: @escaping (Bool) -> Void) {
     // 2. Send InitCommandRequest (Packet Type: 0x00000001)
-    // 16-byte random GUID + UTF-16LE Null-terminated friendly name ("PhotoE-Zi\0") + version (0x00010000)
+    // EXACTLY 40 BYTES for Fujifilm PTP/IP:
+    // [0..3]: Length = 40 (UInt32 LE)
+    // [4..7]: Type = 1 (UInt32 LE, PTPIP_INIT_COMMAND_REQ)
+    // [8..23]: GUID (16 bytes)
+    // [24..39]: Device Name UTF-16LE null-terminated (16 bytes, padded with zeros)
+    var packet = Data(count: 40)
+
+    var lenLE = UInt32(40).littleEndian
+    packet.replaceSubrange(0..<4, with: Data(bytes: &lenLE, count: 4))
+
+    var typeLE = UInt32(1).littleEndian
+    packet.replaceSubrange(4..<8, with: Data(bytes: &typeLE, count: 4))
+
     var guid = [UInt8](repeating: 0, count: 16)
     _ = SecRandomCopyBytes(kSecRandomDefault, 16, &guid)
+    packet.replaceSubrange(8..<24, with: Data(guid))
 
-    let appName = "PhotoE-Zi\0"
-    guard let nameData = appName.data(using: .utf16LittleEndian) else {
-      self.disconnect()
-      self.sendEvent(type: "connectionStateChanged", data: "error")
-      finish(false)
-      return
+    let appName = "PhotoEZ\0"
+    if let nameData = appName.data(using: .utf16LittleEndian) {
+      let copyLen = min(nameData.count, 16)
+      packet.replaceSubrange(24..<(24 + copyLen), with: nameData.prefix(copyLen))
     }
 
-    let version: UInt32 = 0x00010000
-    let packetLen = UInt32(28 + nameData.count)
-    var packet = Data()
-    var pLen = packetLen.littleEndian
-    var pType = UInt32(1).littleEndian
-    var pVer = version.littleEndian
-
-    packet.append(Data(bytes: &pLen, count: 4))
-    packet.append(Data(bytes: &pType, count: 4))
-    packet.append(Data(guid))
-    packet.append(nameData)
-    packet.append(Data(bytes: &pVer, count: 4))
+    let txHex = packet.map { String(format: "%02hhX", $0) }.joined(separator: " ")
+    NSLog("[PtpIp] TX InitCommandRequest (%d bytes): %@", packet.count, txHex)
 
     connection.send(content: packet, completion: .contentProcessed { [weak self] error in
       guard let self = self, error == nil else {
+        NSLog("[PtpIp] Error sending InitCommandRequest: \(String(describing: error))")
         self?.disconnect()
         self?.sendEvent(type: "connectionStateChanged", data: "error")
         finish(false)
@@ -475,6 +477,7 @@ class CameraBridgeManager: NSObject, FlutterStreamHandler, ICDeviceBrowserDelega
       // 3. Wait for InitCommandAck (Packet Type: 0x00000002)
       self.waitForInitCommandAck(connection: connection) { [weak self] ackSuccess in
         guard let self = self, ackSuccess else {
+          NSLog("[PtpIp] Failed waiting for InitCommandAck")
           self?.disconnect()
           self?.sendEvent(type: "connectionStateChanged", data: "error")
           finish(false)
@@ -484,6 +487,7 @@ class CameraBridgeManager: NSObject, FlutterStreamHandler, ICDeviceBrowserDelega
         // 4. Send OpenSession (Operation Code: 0x1002, SessionID = 1)
         self.sendOpenSession(connection: connection) { [weak self] sessionSuccess in
           guard let self = self, sessionSuccess else {
+            NSLog("[PtpIp] Failed sending OpenSession")
             self?.disconnect()
             self?.sendEvent(type: "connectionStateChanged", data: "error")
             finish(false)
@@ -491,6 +495,7 @@ class CameraBridgeManager: NSObject, FlutterStreamHandler, ICDeviceBrowserDelega
           }
 
           // 5. Update State: HANYA ubah state koneksi menjadi connected setelah langkah 1 sampai 4 berhasil
+          NSLog("[PtpIp] Handshake completed successfully! Connected.")
           self.handshakeTimeoutWorkItem?.cancel()
           self.isConnected = true
           self.sendEvent(type: "connectionStateChanged", data: "connected")
@@ -508,9 +513,10 @@ class CameraBridgeManager: NSObject, FlutterStreamHandler, ICDeviceBrowserDelega
         completion(false)
         return
       }
-      let ackType = data.subdata(in: 4..<8).withUnsafeBytes { $0.load(as: UInt32.self) }
-      NSLog("[PtpIp] Received InitCommand response packet type: \(ackType), bytes: \(data.count)")
+      let rxHex = data.map { String(format: "%02hhX", $0) }.joined(separator: " ")
+      NSLog("[PtpIp] RX InitCommand response (%d bytes): %@", data.count, rxHex)
 
+      let ackType = data.subdata(in: 4..<8).withUnsafeBytes { $0.load(as: UInt32.self) }
       if ackType == 2 { // PTPIP_INIT_COMMAND_ACK = 0x00000002
         completion(true)
       } else {
@@ -538,8 +544,16 @@ class CameraBridgeManager: NSObject, FlutterStreamHandler, ICDeviceBrowserDelega
     openSessionPacket.append(Data(bytes: &transIdLE, count: 4))
     openSessionPacket.append(Data(bytes: &sessionIdLE, count: 4))
 
+    let txSessionHex = openSessionPacket.map { String(format: "%02hhX", $0) }.joined(separator: " ")
+    NSLog("[PtpIp] TX OpenSession (%d bytes): %@", openSessionPacket.count, txSessionHex)
+
     connection.send(content: openSessionPacket, completion: .contentProcessed { error in
-      completion(error == nil)
+      if let error = error {
+        NSLog("[PtpIp] Error sending OpenSession: \(error)")
+        completion(false)
+      } else {
+        completion(true)
+      }
     })
   }
 
