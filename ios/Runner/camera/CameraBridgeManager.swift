@@ -258,11 +258,6 @@ class CameraBridgeManager: NSObject, FlutterStreamHandler, ICDeviceBrowserDelega
       var thumbBytes: FlutterStandardTypedData? = nil
       if let data = thumbnailData, !data.isEmpty {
         thumbBytes = FlutterStandardTypedData(bytes: data)
-      } else if let cgThumb = file.thumbnailIfAvailable {
-        let uiImage = UIImage(cgImage: cgThumb)
-        if let jpegData = uiImage.jpegData(compressionQuality: 0.8) {
-          thumbBytes = FlutterStandardTypedData(bytes: jpegData)
-        }
       }
 
       // If thumbnail is available immediately, dispatch stage 1
