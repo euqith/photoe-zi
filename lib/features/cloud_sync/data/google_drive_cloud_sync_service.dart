@@ -5,9 +5,11 @@ import 'dart:math' as math;
 
 import 'package:drift/drift.dart';
 import 'package:http/http.dart' as http;
+import 'package:flutter/services.dart';
 import 'package:photoe_zi/core/database/app_database.dart';
 import 'package:photoe_zi/features/cloud_sync/data/cloud_sync_service.dart';
 import 'package:photoe_zi/features/cloud_sync/data/google_oauth_config_manager.dart';
+import 'package:photoe_zi/features/cloud_sync/data/oauth_popup_channel.dart';
 import 'package:photoe_zi/features/film_sim/data/lut_baker_service.dart';
 import 'package:photoe_zi/features/film_sim/data/lut_preset_manager.dart';
 
@@ -260,59 +262,79 @@ class GoogleDriveCloudSyncService implements CloudSyncService {
         'prompt': 'select_account consent',
       });
 
-      await openSystemUrl(authUrl.toString(), asPopup: true);
-
       String? authCode;
-      await for (final HttpRequest request in server.timeout(
-        const Duration(minutes: 3),
-      )) {
-        // Ignore favicon requests from the browser
-        if (request.uri.path == '/favicon.ico') {
-          request.response.statusCode = 404;
-          await request.response.close();
-          continue;
+      bool handledByNativePopup = false;
+
+      // Primary path (iOS, Android, macOS): Launch native in-app OAuth Popup Window
+      // which intercepts the 127.0.0.1 redirect and automatically closes itself in 0ms.
+      try {
+        final callbackUrl = await OAuthPopupChannel.openOAuthPopup(
+          authUrl: authUrl.toString(),
+          redirectUriPrefix: redirectUri,
+        );
+        handledByNativePopup = true;
+
+        if (callbackUrl == null || callbackUrl.trim().isEmpty) {
+          _lastErrorMessage = 'Google Sign-In popup was closed.';
+          return false;
         }
 
-        final code = request.uri.queryParameters['code'];
-        final error = request.uri.queryParameters['error'];
+        final callbackUri = Uri.parse(callbackUrl);
+        final error = callbackUri.queryParameters['error'];
+        if (error != null && error.isNotEmpty) {
+          _lastErrorMessage = 'Google Sign-In cancelled ($error).';
+          return false;
+        }
+        authCode = callbackUri.queryParameters['code'];
+      } on MissingPluginException {
+        handledByNativePopup = false;
+      } on PlatformException {
+        handledByNativePopup = false;
+      }
 
-        request.response.headers.contentType = ContentType.html;
-        if (code != null && code.isNotEmpty) {
-          authCode = code;
-          request.response.write('''
+      // Fallback path (headless/desktop browsers if native popup channel isn't registered)
+      if (!handledByNativePopup) {
+        await openSystemUrl(authUrl.toString(), asPopup: true);
+
+        await for (final HttpRequest request in server.timeout(
+          const Duration(minutes: 3),
+        )) {
+          if (request.uri.path == '/favicon.ico') {
+            request.response.statusCode = 404;
+            await request.response.close();
+            continue;
+          }
+
+          final code = request.uri.queryParameters['code'];
+          final error = request.uri.queryParameters['error'];
+
+          request.response.headers.contentType = ContentType.html;
+          if (code != null && code.isNotEmpty) {
+            authCode = code;
+            request.response.write('''
 <!DOCTYPE html>
 <html>
 <head>
   <meta charset="utf-8">
   <title>PhotoE-Zi · Signed in with Google</title>
   <script>
-    function autoClose() {
-      try { window.opener = null; } catch(e){}
-      try { window.open('', '_self'); } catch(e){}
-      try { window.close(); } catch(e){}
-    }
-    autoClose();
-    setTimeout(autoClose, 300);
-    setTimeout(autoClose, 800);
+    try { window.opener = null; window.open('', '_self'); window.close(); } catch(e){}
   </script>
 </head>
-<body style="background:#0F0F10;color:#F3F4F6;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;display:flex;align-items:center;justify-content:center;height:100vh;margin:0;">
-  <div style="background:#1A1A1D;border:1px solid #2A2A2E;border-radius:14px;padding:36px 40px;text-align:center;max-width:380px;box-shadow:0 20px 40px rgba(0,0,0,0.5);">
-    <div style="width:48px;height:48px;border-radius:50%;background:rgba(16,185,129,0.15);color:#10B981;display:inline-flex;align-items:center;justify-content:center;font-size:24px;margin-bottom:16px;">✓</div>
-    <h2 style="margin:0 0 8px 0;font-size:18px;color:#F3F4F6;">Google Account Connected!</h2>
-    <p style="margin:0;color:#9CA3AF;font-size:13px;line-height:1.5;">You are now signed in to <b>PhotoE-Zi</b>. Closing this window...</p>
-    <button onclick="autoClose()" style="margin-top:16px;background:#27272A;border:1px solid #3F3F46;color:#E5E7EB;padding:8px 16px;border-radius:8px;font-size:12px;cursor:pointer;">Close Window</button>
+<body style="background:#0F0F10;color:#F3F4F6;font-family:-apple-system,BlinkMacSystemFont,sans-serif;display:flex;align-items:center;justify-content:center;height:100vh;margin:0;">
+  <div style="background:#1A1A1D;border:1px solid #2A2A2E;border-radius:14px;padding:32px 36px;text-align:center;max-width:360px;">
+    <div style="width:44px;height:44px;border-radius:50%;background:rgba(16,185,129,0.15);color:#10B981;display:inline-flex;align-items:center;justify-content:center;font-size:22px;margin-bottom:14px;">✓</div>
+    <h2 style="margin:0 0 8px 0;font-size:17px;color:#F3F4F6;">Google Account Connected!</h2>
+    <p style="margin:0;color:#9CA3AF;font-size:12.5px;line-height:1.5;">You are now signed in to <b>PhotoE-Zi</b>. Please return to the PhotoE-Zi app.</p>
   </div>
 </body>
 </html>
 ''');
-          await request.response.close();
-          if (Platform.isMacOS) {
-            unawaited(_closeAuthBrowserWindowOnMac());
-          }
-          break;
-        } else if (error != null) {
-          request.response.write('''
+            await request.response.close();
+            unawaited(OAuthPopupChannel.closeOAuthPopup());
+            break;
+          } else if (error != null) {
+            request.response.write('''
 <!DOCTYPE html>
 <html>
 <body style="background:#0F0F10;color:#EF4444;font-family:sans-serif;text-align:center;padding-top:60px;">
@@ -320,11 +342,13 @@ class GoogleDriveCloudSyncService implements CloudSyncService {
 </body>
 </html>
 ''');
-          await request.response.close();
-          break;
-        } else {
-          request.response.statusCode = 200;
-          await request.response.close();
+            await request.response.close();
+            unawaited(OAuthPopupChannel.closeOAuthPopup());
+            break;
+          } else {
+            request.response.statusCode = 200;
+            await request.response.close();
+          }
         }
       }
 
@@ -371,40 +395,9 @@ class GoogleDriveCloudSyncService implements CloudSyncService {
     }
   }
 
-  /// Opens a URL in the host OS default browser (macOS `open`, Linux `xdg-open`, Windows `start`).
-  /// Launches the user's active browser where their Google Account is already signed in.
+  /// Opens an external URL across iOS, Android, macOS, Windows, and Linux.
   static Future<void> openSystemUrl(String url, {bool asPopup = false}) async {
-    try {
-      if (Platform.isMacOS) {
-        await Process.run('open', [url]);
-      } else if (Platform.isLinux) {
-        await Process.run('xdg-open', [url]);
-      } else if (Platform.isWindows) {
-        await Process.run('cmd', ['/c', 'start', '', url]);
-      }
-    } catch (_) {}
-  }
-
-  static Future<void> _closeAuthBrowserWindowOnMac() async {
-    try {
-      await Future<void>.delayed(const Duration(milliseconds: 600));
-      await Process.run('osascript', [
-        '-e',
-        '''
-        try
-          tell application "Google Chrome"
-            repeat with aWindow in windows
-              repeat with aTab in tabs of aWindow
-                if URL of aTab contains "127.0.0.1" or title of aTab contains "PhotoE-Zi" then
-                  close aTab
-                end if
-              end repeat
-            end repeat
-          end tell
-        end try
-        ''',
-      ]);
-    } catch (_) {}
+    await OAuthPopupChannel.openExternalUrl(url);
   }
 
   @override

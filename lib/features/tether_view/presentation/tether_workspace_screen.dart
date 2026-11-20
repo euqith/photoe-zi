@@ -1129,12 +1129,14 @@ class _TetherWorkspaceScreenState
 
           return Dialog(
             backgroundColor: StudioColors.panelSurface,
+            insetPadding:
+                const EdgeInsets.symmetric(horizontal: 16, vertical: 20),
             shape: RoundedRectangleBorder(
               borderRadius: BorderRadius.circular(14),
               side: const BorderSide(color: StudioColors.panelBorder),
             ),
             child: Container(
-              width: 440,
+              constraints: const BoxConstraints(maxWidth: 440),
               padding: const EdgeInsets.all(20),
               child: SingleChildScrollView(
                 child: Column(
@@ -1294,29 +1296,42 @@ class _TetherWorkspaceScreenState
                                 onPressed: isAuthenticating
                                     ? null
                                     : () async {
-                                        setDialogState(() {
-                                          isAuthenticating = true;
-                                          isErrorFeedback = false;
-                                          statusFeedback =
-                                              'Choose your Google account in the browser pop-up...';
-                                        });
-                                        final ok = await controller
-                                            .signInGoogleWithBrowserOAuth(
-                                          clientId: clientIdController.text,
-                                          clientSecret:
-                                              clientSecretController.text,
-                                        );
-                                        setDialogState(() {
-                                          isAuthenticating = false;
-                                          isErrorFeedback = !ok;
-                                          statusFeedback = ok
-                                              ? '✓ Signed in as ${ref.read(tetherControllerProvider).googleUserEmail}'
-                                              : (ref
-                                                      .read(
-                                                          tetherControllerProvider)
-                                                      .googleAuthError ??
-                                                  'Sign-in cancelled');
-                                        });
+                                          setDialogState(() {
+                                            isAuthenticating = true;
+                                            isErrorFeedback = false;
+                                            statusFeedback =
+                                                'Complete Google Sign-In in the popup window...';
+                                          });
+                                          final ok = await controller
+                                              .signInGoogleWithBrowserOAuth(
+                                            clientId: clientIdController.text,
+                                            clientSecret:
+                                                clientSecretController.text,
+                                          );
+                                          if (ok &&
+                                              linkController.text
+                                                  .trim()
+                                                  .isNotEmpty) {
+                                            await controller
+                                                .registerCustomDriveFolderLink(
+                                              linkController.text,
+                                              setAsDefaultParent:
+                                                  setAsDefaultParent,
+                                            );
+                                          }
+                                          if (ctx.mounted) {
+                                            setDialogState(() {
+                                              isAuthenticating = false;
+                                              isErrorFeedback = !ok;
+                                              statusFeedback = ok
+                                                  ? '✓ Signed in as ${ref.read(tetherControllerProvider).googleUserEmail}'
+                                                  : (ref
+                                                          .read(
+                                                              tetherControllerProvider)
+                                                          .googleAuthError ??
+                                                      'Sign-in cancelled');
+                                            });
+                                          }
                                       },
                                 style: ElevatedButton.styleFrom(
                                   backgroundColor: Colors.white,

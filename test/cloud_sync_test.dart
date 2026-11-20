@@ -3,6 +3,7 @@ import 'dart:io';
 
 import 'package:drift/drift.dart' hide isNotNull, isNull;
 import 'package:drift/native.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:http/http.dart' as http;
 import 'package:http/testing.dart';
@@ -428,6 +429,81 @@ void main() {
       expect(config.isConfigured, isTrue);
       expect(config.clientId, contains('apps.googleusercontent.com'));
       expect(config.appName, 'PhotoE-Zi');
+    });
+
+    test(
+        'Issue #3.12 — completes Google Sign-In via native auto-closing OAuth Popup channel (iOS, Android & macOS)',
+        () async {
+      const channel = MethodChannel('com.photoezi/oauth_popup');
+      String? capturedAuthUrl;
+      String? capturedRedirectPrefix;
+
+      TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+          .setMockMethodCallHandler(channel, (MethodCall call) async {
+        if (call.method == 'openOAuthPopup') {
+          final args = call.arguments as Map<dynamic, dynamic>;
+          capturedAuthUrl = args['url']?.toString();
+          capturedRedirectPrefix = args['redirectPrefix']?.toString();
+          // Simulate native popup intercepting the redirect & auto-closing immediately
+          return '$capturedRedirectPrefix?code=native_popup_code_777&scope=https://www.googleapis.com/auth/drive';
+        }
+        return null;
+      });
+
+      final mockHttp = MockClient((http.Request request) async {
+        if (request.url.toString() == 'https://oauth2.googleapis.com/token') {
+          expect(request.body, contains('code=native_popup_code_777'));
+          return http.Response(
+            jsonEncode({
+              'access_token': 'ya29.native_popup_access_token',
+              'token_type': 'Bearer',
+              'expires_in': 3599,
+            }),
+            200,
+          );
+        }
+        if (request.url.path.contains('tokeninfo')) {
+          return http.Response(
+            jsonEncode({
+              'email': 'mobile.studio@photoe-zi.app',
+              'expires_in': 3599,
+            }),
+            200,
+          );
+        }
+        if (request.url.path.endsWith('/drive/v3/about')) {
+          return http.Response(
+            jsonEncode({
+              'user': {
+                'emailAddress': 'mobile.studio@photoe-zi.app',
+                'displayName': 'Mobile Studio Photographer',
+              }
+            }),
+            200,
+          );
+        }
+        return http.Response('Not found', 404);
+      });
+
+      final popupService = GoogleDriveCloudSyncService(
+        db: db,
+        lutManager: lutManager,
+        lutBaker: const LutBakerService(),
+        httpClient: mockHttp,
+      );
+
+      final ok = await popupService.signInWithBrowserOAuth(
+        clientId: '455763189700-test.apps.googleusercontent.com',
+      );
+
+      expect(ok, isTrue);
+      expect(capturedAuthUrl, contains('accounts.google.com/o/oauth2/v2/auth'));
+      expect(capturedRedirectPrefix, startsWith('http://127.0.0.1:'));
+      expect(popupService.isSignedIn, isTrue);
+      expect(popupService.currentUser?.email, 'mobile.studio@photoe-zi.app');
+
+      TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+          .setMockMethodCallHandler(channel, null);
     });
   });
 }
