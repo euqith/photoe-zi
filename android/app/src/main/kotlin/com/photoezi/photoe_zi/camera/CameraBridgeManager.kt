@@ -38,6 +38,16 @@ class CameraBridgeManager(
         onNewPhoto = { photo -> sendEvent("photoAdded", photo) }
     )
 
+    private val fujiWifiDriver = FujifilmWifiDriver(
+        onStateChange = { state -> sendEvent("connectionStateChanged", state) },
+        onNewPhoto = { photo -> sendEvent("photoAdded", photo) }
+    )
+
+    private val dualNetworkManager = DualNetworkManager(
+        context = context,
+        onNetworkStatusChanged = { status -> sendEvent("networkStatusChanged", status) }
+    )
+
     private var activeDriverType = "mock"
 
     init {
@@ -87,6 +97,12 @@ class CameraBridgeManager(
                         "name" to "Canon EOS (Wi-Fi PTP/IP)",
                         "type" to "wifi",
                         "isAvailable" to true
+                    ),
+                    mapOf(
+                        "id" to "fuji_wifi",
+                        "name" to "Fujifilm X-T10 (Wi-Fi PTP/IP)",
+                        "type" to "wifi",
+                        "isAvailable" to true
                     )
                 )
                 result.success(drivers)
@@ -101,7 +117,14 @@ class CameraBridgeManager(
                 scope.launch {
                     val ok = when (driverType) {
                         "canon_usb" -> usbDriver.connect()
-                        "canon_wifi" -> wifiDriver.connect(ipAddress, port)
+                        "canon_wifi" -> {
+                            dualNetworkManager.enableCellularRouting()
+                            wifiDriver.connect(ipAddress, port)
+                        }
+                        "fuji_wifi" -> {
+                            dualNetworkManager.enableCellularRouting()
+                            fujiWifiDriver.connect(ipAddress, port)
+                        }
                         else -> true
                     }
                     result.success(ok)
@@ -111,7 +134,14 @@ class CameraBridgeManager(
             "disconnectCamera" -> {
                 when (activeDriverType) {
                     "canon_usb" -> usbDriver.disconnect()
-                    "canon_wifi" -> wifiDriver.disconnect()
+                    "canon_wifi" -> {
+                        wifiDriver.disconnect()
+                        dualNetworkManager.disableCellularRouting()
+                    }
+                    "fuji_wifi" -> {
+                        fujiWifiDriver.disconnect()
+                        dualNetworkManager.disableCellularRouting()
+                    }
                 }
                 result.success(true)
             }
@@ -133,6 +163,20 @@ class CameraBridgeManager(
                 }
             }
 
+            "getNetworkStatus" -> {
+                result.success(dualNetworkManager.getNetworkStatus())
+            }
+
+            "enableCellularSync" -> {
+                dualNetworkManager.enableCellularRouting()
+                result.success(true)
+            }
+
+            "disableCellularSync" -> {
+                dualNetworkManager.disableCellularRouting()
+                result.success(true)
+            }
+
             else -> result.notImplemented()
         }
     }
@@ -140,5 +184,7 @@ class CameraBridgeManager(
     fun destroy() {
         usbDriver.destroy()
         wifiDriver.disconnect()
+        fujiWifiDriver.disconnect()
+        dualNetworkManager.destroy()
     }
 }

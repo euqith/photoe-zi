@@ -69,6 +69,12 @@ class CameraDriverManager implements BaseCameraDriver {
         driverName: 'Canon EOS (Wi-Fi PTP/IP)',
         connectionType: CameraConnectionType.wifi,
       );
+    } else if (driverId == 'fuji_wifi') {
+      _activeDriver = CanonNativeCameraDriver(
+        driverId: 'fuji_wifi',
+        driverName: 'Fujifilm X-T10 (Wi-Fi PTP/IP)',
+        connectionType: CameraConnectionType.wifi,
+      );
     } else {
       _activeDriver = MockCameraDriver();
     }

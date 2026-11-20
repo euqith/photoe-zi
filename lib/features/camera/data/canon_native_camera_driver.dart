@@ -11,7 +11,7 @@ class CanonNativeCameraDriver implements BaseCameraDriver {
   static const EventChannel _eventChannel =
       EventChannel('com.photoezi/camera_events');
 
-  final String driverId; // 'canon_usb' or 'canon_wifi'
+  final String driverId; // 'canon_usb', 'canon_wifi', or 'fuji_wifi'
   final String _driverName;
   final CameraConnectionType _connectionType;
 
@@ -30,7 +30,9 @@ class CanonNativeCameraDriver implements BaseCameraDriver {
   })  : _driverName = driverName ??
             (driverId == 'canon_usb'
                 ? 'Canon EOS (Wired USB-OTG)'
-                : 'Canon EOS (Wi-Fi PTP/IP)'),
+                : driverId == 'fuji_wifi'
+                    ? 'Fujifilm X-T10 (Wi-Fi PTP/IP)'
+                    : 'Canon EOS (Wi-Fi PTP/IP)'),
         _connectionType = connectionType ??
             (driverId == 'canon_usb'
                 ? CameraConnectionType.usb
@@ -73,7 +75,7 @@ class CanonNativeCameraDriver implements BaseCameraDriver {
   void _handleIncomingNativePhoto(Map<dynamic, dynamic> map) {
     try {
       final id = map['id']?.toString() ??
-          'canon_${DateTime.now().millisecondsSinceEpoch}';
+          'photo_${DateTime.now().millisecondsSinceEpoch}';
       final fileName = map['fileName']?.toString() ?? 'IMG_0001.JPG';
       final previewBytes = map['previewBytes'] as Uint8List?;
       final capturedAtMs = map['capturedAt'] as int?;
@@ -121,10 +123,13 @@ class CanonNativeCameraDriver implements BaseCameraDriver {
       _connectionController.add(CameraConnectionState.connecting);
     }
     try {
+      final defaultIp = (driverId == 'fuji_wifi') ? '192.168.0.1' : '192.168.1.1';
+      final defaultPort = (driverId == 'fuji_wifi') ? 55740 : 15740;
+
       final ok = await _methodChannel.invokeMethod<bool>('connectCamera', {
         'driverType': driverId,
-        'ipAddress': ipAddress ?? '192.168.1.1',
-        'port': port ?? 15740,
+        'ipAddress': ipAddress ?? defaultIp,
+        'port': port ?? defaultPort,
       });
       if (ok != true) {
         _state = CameraConnectionState.disconnected;
@@ -200,6 +205,12 @@ class CanonNativeCameraDriver implements BaseCameraDriver {
       CameraDriverInfo(
         id: 'canon_wifi',
         name: 'Canon EOS (Wi-Fi PTP/IP)',
+        type: CameraDriverType.wifi,
+        isAvailable: true,
+      ),
+      CameraDriverInfo(
+        id: 'fuji_wifi',
+        name: 'Fujifilm X-T10 (Wi-Fi PTP/IP)',
         type: CameraDriverType.wifi,
         isAvailable: true,
       ),

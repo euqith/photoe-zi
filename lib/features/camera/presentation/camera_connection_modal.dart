@@ -76,11 +76,15 @@ class _CameraConnectionModalState extends State<CameraConnectionModal> {
       ),
       child: Container(
         width: 440,
+        constraints: BoxConstraints(
+          maxHeight: MediaQuery.sizeOf(context).height * 0.9,
+        ),
         padding: const EdgeInsets.all(20),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
+        child: SingleChildScrollView(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
             // Modal Header
             Row(
               children: [
@@ -246,54 +250,21 @@ class _CameraConnectionModalState extends State<CameraConnectionModal> {
               ),
               if (_selectedDriverId == 'canon_wifi') ...[
                 const SizedBox(height: 8),
-                Container(
-                  padding: const EdgeInsets.all(10),
-                  decoration: BoxDecoration(
-                    color: StudioColors.inputSurface,
-                    borderRadius: BorderRadius.circular(6),
-                    border: Border.all(color: StudioColors.panelBorder),
-                  ),
-                  child: Row(
-                    children: [
-                      Expanded(
-                        flex: 3,
-                        child: TextField(
-                          controller: _ipController,
-                          style: const TextStyle(
-                            fontSize: 11,
-                            fontFamily: StudioTheme.monospaceFont,
-                            color: StudioColors.textPrimary,
-                          ),
-                          decoration: const InputDecoration(
-                            isDense: true,
-                            labelText: 'Camera IP',
-                            labelStyle: TextStyle(fontSize: 10),
-                            border: OutlineInputBorder(),
-                          ),
-                        ),
-                      ),
-                      const SizedBox(width: 8),
-                      Expanded(
-                        flex: 2,
-                        child: TextField(
-                          controller: _portController,
-                          keyboardType: TextInputType.number,
-                          style: const TextStyle(
-                            fontSize: 11,
-                            fontFamily: StudioTheme.monospaceFont,
-                            color: StudioColors.textPrimary,
-                          ),
-                          decoration: const InputDecoration(
-                            isDense: true,
-                            labelText: 'Port',
-                            labelStyle: TextStyle(fontSize: 10),
-                            border: OutlineInputBorder(),
-                          ),
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
+                _buildNetworkConfigInputs(),
+              ],
+              const SizedBox(height: 6),
+              _buildDriverOption(
+                id: 'fuji_wifi',
+                title: 'Fujifilm X-T10 (Wi-Fi PTP/IP)',
+                subtitle:
+                    'Connects to Fuji camera AP (port 55740 / 8574)',
+                icon: Icons.wifi_tethering_rounded,
+                badgeText: 'Fuji PTP/IP',
+                badgeColor: const Color(0xFF10B981),
+              ),
+              if (_selectedDriverId == 'fuji_wifi') ...[
+                const SizedBox(height: 8),
+                _buildNetworkConfigInputs(),
               ],
               const SizedBox(height: 6),
               _buildDriverOption(
@@ -360,8 +331,9 @@ class _CameraConnectionModalState extends State<CameraConnectionModal> {
           ],
         ),
       ),
-    );
-  }
+    ),
+  );
+}
 
   bool _isDriverAvailable(String id) {
     return _drivers.any((d) => d.id == id && d.isAvailable);
@@ -381,6 +353,13 @@ class _CameraConnectionModalState extends State<CameraConnectionModal> {
       onTap: () {
         setState(() {
           _selectedDriverId = id;
+          if (id == 'fuji_wifi' && (_ipController.text == '192.168.1.1' || _ipController.text.isEmpty)) {
+            _ipController.text = '192.168.0.1';
+            _portController.text = '55740';
+          } else if (id == 'canon_wifi' && (_ipController.text == '192.168.0.1' || _ipController.text.isEmpty)) {
+            _ipController.text = '192.168.1.1';
+            _portController.text = '15740';
+          }
         });
       },
       borderRadius: BorderRadius.circular(6),
@@ -459,6 +438,57 @@ class _CameraConnectionModalState extends State<CameraConnectionModal> {
             ),
           ],
         ),
+      ),
+    );
+  }
+
+  Widget _buildNetworkConfigInputs() {
+    return Container(
+      padding: const EdgeInsets.all(10),
+      decoration: BoxDecoration(
+        color: StudioColors.inputSurface,
+        borderRadius: BorderRadius.circular(6),
+        border: Border.all(color: StudioColors.panelBorder),
+      ),
+      child: Row(
+        children: [
+          Expanded(
+            flex: 3,
+            child: TextField(
+              controller: _ipController,
+              style: const TextStyle(
+                fontSize: 11,
+                fontFamily: StudioTheme.monospaceFont,
+                color: StudioColors.textPrimary,
+              ),
+              decoration: const InputDecoration(
+                isDense: true,
+                labelText: 'Camera IP',
+                labelStyle: TextStyle(fontSize: 10),
+                border: OutlineInputBorder(),
+              ),
+            ),
+          ),
+          const SizedBox(width: 8),
+          Expanded(
+            flex: 2,
+            child: TextField(
+              controller: _portController,
+              keyboardType: TextInputType.number,
+              style: const TextStyle(
+                fontSize: 11,
+                fontFamily: StudioTheme.monospaceFont,
+                color: StudioColors.textPrimary,
+              ),
+              decoration: const InputDecoration(
+                isDense: true,
+                labelText: 'Port',
+                labelStyle: TextStyle(fontSize: 10),
+                border: OutlineInputBorder(),
+              ),
+            ),
+          ),
+        ],
       ),
     );
   }

@@ -269,8 +269,9 @@ void main() {
       expect(find.text('Camera IP'), findsOneWidget);
 
       // Click Connect button
+      await tester.ensureVisible(find.byKey(const Key('btn_confirm_camera_connection')));
       await tester.tap(find.byKey(const Key('btn_confirm_camera_connection')));
-      await tester.pump();
+      await tester.pumpAndSettle();
 
       expect(selectedDriver, 'canon_wifi');
       expect(connectedIp, '192.168.1.1');

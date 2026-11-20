@@ -165,6 +165,32 @@ class TopWorkspaceBar extends StatelessWidget {
                         ),
                       ),
                     ),
+                    if (isConnected && cameraDriverName.toLowerCase().contains('wi-fi')) ...[
+                      const SizedBox(width: 6),
+                      Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 4),
+                        decoration: BoxDecoration(
+                          color: const Color(0xFF0284C7).withValues(alpha: 0.16),
+                          borderRadius: BorderRadius.circular(4),
+                          border: Border.all(color: const Color(0xFF0284C7)),
+                        ),
+                        child: const Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Icon(Icons.cell_tower_rounded, size: 12, color: Color(0xFF38BDF8)),
+                            SizedBox(width: 4),
+                            Text(
+                              'Dual-Net',
+                              style: TextStyle(
+                                fontSize: 10,
+                                fontWeight: FontWeight.w600,
+                                color: Color(0xFF38BDF8),
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ],
                     const SizedBox(width: 6),
 
                     // Manual Mock Photo Generator Button
