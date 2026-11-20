@@ -23,6 +23,7 @@ class MainPhotoCanvas extends StatefulWidget {
   final bool isLiveViewActive;
   final bool isLiveViewReconnecting;
   final Uint8List? liveViewFrame;
+  final VoidCallback? onCancelLiveView;
   final VoidCallback onToggleFavorite;
   final VoidCallback onToggleReject;
   final VoidCallback onJumpToLatest;
@@ -44,6 +45,7 @@ class MainPhotoCanvas extends StatefulWidget {
     this.isLiveViewActive = false,
     this.isLiveViewReconnecting = false,
     this.liveViewFrame,
+    this.onCancelLiveView,
     required this.onToggleFavorite,
     required this.onToggleReject,
     required this.onJumpToLatest,
@@ -535,10 +537,10 @@ class _MainPhotoCanvasState extends State<MainPhotoCanvas> {
                         ),
                       ],
                     ),
-                    child: const Column(
+                    child: Column(
                       mainAxisSize: MainAxisSize.min,
                       children: [
-                        SizedBox(
+                        const SizedBox(
                           width: 24,
                           height: 24,
                           child: CircularProgressIndicator(
@@ -548,8 +550,8 @@ class _MainPhotoCanvasState extends State<MainPhotoCanvas> {
                             ),
                           ),
                         ),
-                        SizedBox(height: 12),
-                        Text(
+                        const SizedBox(height: 12),
+                        const Text(
                           'Resuming Live View (EVF)...',
                           style: TextStyle(
                             color: StudioColors.textPrimary,
@@ -557,14 +559,35 @@ class _MainPhotoCanvasState extends State<MainPhotoCanvas> {
                             fontWeight: FontWeight.w600,
                           ),
                         ),
-                        SizedBox(height: 4),
-                        Text(
+                        const SizedBox(height: 4),
+                        const Text(
                           'Clearing camera buffer · Auto-restarting EVF',
                           style: TextStyle(
                             color: StudioColors.textMuted,
                             fontSize: 10,
                           ),
                         ),
+                        if (widget.onCancelLiveView != null) ...[
+                          SizedBox(height: 12),
+                          InkWell(
+                            onTap: widget.onCancelLiveView,
+                            borderRadius: BorderRadius.all(Radius.circular(4)),
+                            child: Padding(
+                              padding: EdgeInsets.symmetric(
+                                horizontal: 10,
+                                vertical: 4,
+                              ),
+                              child: Text(
+                                'Cancel & Return to Photo',
+                                style: TextStyle(
+                                  color: StudioColors.accentAmber,
+                                  fontSize: 11,
+                                  fontWeight: FontWeight.w600,
+                                ),
+                              ),
+                            ),
+                          ),
+                        ],
                       ],
                     ),
                   ),

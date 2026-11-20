@@ -932,6 +932,17 @@ class TetherWorkspaceController extends StateNotifier<TetherSessionState> {
     await cameraDriver.triggerCapture();
   }
 
+  void cancelLiveViewReconnecting() {
+    cameraDriver.stopLiveView();
+    if (mounted) {
+      state = state.copyWith(
+        isLiveViewActive: false,
+        isLiveViewReconnecting: false,
+        clearLiveViewFrame: true,
+      );
+    }
+  }
+
   @override
   void dispose() {
     _connSub?.cancel();

@@ -30,6 +30,7 @@ class CanonNativeCameraDriver implements BaseCameraDriver {
   bool _isLiveViewActive = false;
   bool _wasInLiveView = false;
   bool _isLiveViewReconnecting = false;
+  Timer? _reconnectTimeoutTimer;
 
   CanonNativeCameraDriver({
     required this.driverId,
@@ -139,6 +140,7 @@ class CanonNativeCameraDriver implements BaseCameraDriver {
       if (_wasInLiveView) {
         _wasInLiveView = false;
         Future.delayed(const Duration(milliseconds: 400), () async {
+          _reconnectTimeoutTimer?.cancel();
           await startLiveView();
         });
       }
@@ -282,6 +284,17 @@ class CanonNativeCameraDriver implements BaseCameraDriver {
       if (!_liveViewStatusController.isClosed) {
         _liveViewStatusController.add(LiveViewStatus.reconnecting);
       }
+      // Safety timeout: if camera is stuck in review mode or buffer delayed > 2.5s, auto-cancel loading
+      _reconnectTimeoutTimer?.cancel();
+      _reconnectTimeoutTimer = Timer(const Duration(milliseconds: 2500), () {
+        if (_isLiveViewReconnecting) {
+          _isLiveViewReconnecting = false;
+          _wasInLiveView = false;
+          if (!_liveViewStatusController.isClosed) {
+            _liveViewStatusController.add(LiveViewStatus.inactive);
+          }
+        }
+      });
     }
 
     try {
@@ -289,6 +302,9 @@ class CanonNativeCameraDriver implements BaseCameraDriver {
           await _methodChannel.invokeMethod<bool>('triggerCapture') ?? false;
       return ok;
     } catch (_) {
+      _reconnectTimeoutTimer?.cancel();
+      _isLiveViewReconnecting = false;
+      _wasInLiveView = false;
       return false;
     }
   }

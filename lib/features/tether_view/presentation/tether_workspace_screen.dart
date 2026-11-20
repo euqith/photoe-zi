@@ -246,6 +246,7 @@ class _TetherWorkspaceScreenState
                   isLiveViewActive: sessionState.isLiveViewActive,
                   isLiveViewReconnecting: sessionState.isLiveViewReconnecting,
                   liveViewFrame: sessionState.liveViewFrame,
+                  onCancelLiveView: controller.cancelLiveViewReconnecting,
                   onToggleFavorite: () {
                     if (activePhoto != null) {
                       controller.toggleFavorite(activePhoto);
@@ -394,6 +395,7 @@ class _TetherWorkspaceScreenState
                 isLiveViewActive: sessionState.isLiveViewActive,
                 isLiveViewReconnecting: sessionState.isLiveViewReconnecting,
                 liveViewFrame: sessionState.liveViewFrame,
+                onCancelLiveView: controller.cancelLiveViewReconnecting,
                 onToggleFavorite: () {
                   if (activePhoto != null) {
                     controller.toggleFavorite(activePhoto);
