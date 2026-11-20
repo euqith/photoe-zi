@@ -127,23 +127,12 @@ class FujifilmWifiDriver(
                 }
             }
 
-            // 3. Complete Fujifilm X-T10 Session Initialization Sequence:
-            //    a) OpenSession (0x1002, param = 1)
+            // 3. Passive Tethering Session Initialization:
+            // OpenSession (0x1002, param = 1)
             sendFujiSingleCommand(0x1002, byteArrayOf(0x01, 0x00, 0x00, 0x00), "OpenSession(0x1002)")
-            //    b) SetDevicePropValue (0x1016) on 0xDF01 = 0x0005 (Remote Mode)
-            sendFujiTwoPartCommand(byteArrayOf(0x01, 0xDF.toByte(), 0x00, 0x00), byteArrayOf(0x05, 0x00), "SetInitMode(0xDF01=5)")
-            //    c) GetDevicePropValue (0x1015) on 0xDF24
-            sendFujiSingleCommand(0x1015, byteArrayOf(0x24, 0xDF.toByte(), 0x00, 0x00), "GetRemoteModeVersion(0xDF24)")
-            //    d) SetDevicePropValue (0x1016) on 0xDF24 = FF 00 02 00
-            sendFujiTwoPartCommand(byteArrayOf(0x24, 0xDF.toByte(), 0x00, 0x00), byteArrayOf(0xFF.toByte(), 0x00, 0x02, 0x00), "SetRemoteModeConfig(0xDF24)")
-            //    e) CameraCapabilities (0x902B)
-            sendFujiSingleCommand(0x902B, byteArrayOf(), "CameraCapabilities(0x902B)")
-            //    f) EnterCameraRemote (0x101C, 8 zero bytes) - transitions camera screen out of "Waiting for connection"!
-            sendFujiSingleCommand(0x101C, ByteArray(8), "EnterCameraRemote(0x101C)")
-            //    g) StatusRequest (0x1015 on 0xD212)
-            sendFujiSingleCommand(0x1015, byteArrayOf(0x12, 0xD2.toByte(), 0x00, 0x00), "StatusRequest(0xD212)")
+            // Do NOT send 0xDF01=5 or 0x101C (EnterCameraRemote) to keep camera LCD/EVF active
 
-            // 4. Connect Event Socket on port 55741
+            // 4. Connect Event Socket on port 55741 for passive Event 0x4002 (ObjectAdded) listening
             connectEventSocket(ipAddress, 55741)
 
             socket.soTimeout = 0 // Remove timeout for regular event listening

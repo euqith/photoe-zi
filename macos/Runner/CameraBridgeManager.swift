@@ -26,6 +26,7 @@ class CameraBridgeManager: NSObject, FlutterStreamHandler, ICDeviceBrowserDelega
   private var isBusyWithCommand = false
   private var lastConnectedHost: String = "192.168.0.1"
   private var transactionId: UInt32 = 1
+  private var connectionNumber: UInt32 = 0
 
   // ImageCaptureCore for Wired USB Tethering on macOS
   private var deviceBrowser: ICDeviceBrowser?
@@ -768,11 +769,11 @@ class CameraBridgeManager: NSObject, FlutterStreamHandler, ICDeviceBrowserDelega
               finish(false)
               return
             }
-            self.logPtpIp("Fujifilm X-T10 full handshake completed! Camera is now in Remote Tethering Mode.")
+            self.logPtpIp("Fujifilm X-T10 handshake completed! Camera is now in Passive Tethering Mode.")
             self.handshakeTimeoutWorkItem?.cancel()
             self.isConnected = true
             self.sendEvent(type: "connectionStateChanged", data: "connected")
-            self.startFujiKeepAlivePolling(connection: connection)
+            // In Passive Tethering mode: Camera LCD remains active, app sits idle waiting for 0x4002 events
             finish(true)
           }
         } else {
@@ -799,15 +800,13 @@ class CameraBridgeManager: NSObject, FlutterStreamHandler, ICDeviceBrowserDelega
   }
 
   /**
-   * Complete Fujifilm X-T10 Session Initialization (derived from fuji-cam-wifi-tool init_control_connection):
-   * 1. OpenSession (0x1002, param = 1) -> expect 0x2001 OK
-   * 2. SetDevicePropValue (0x1016) on 0xDF01 = 0x0005 (Remote Mode) -> expect 0x2001 OK
-   * 3. GetDevicePropValue (0x1015) on 0xDF24 -> expect data + 0x2001 OK
-   * 4. SetDevicePropValue (0x1016) on 0xDF24 = 0x000200FF -> expect 0x2001 OK
-   * 5. GetCameraCapabilities (0x902B) -> expect capabilities data + 0x2001 OK
-   * 6. EnterCameraRemote (0x101C, 8 zero bytes) -> expect 0x2001 OK ("last command before camera remote works")
-   * 7. QueryCurrentSettings (0x1015) on 0xD212 -> expect settings data + 0x2001 OK
-   * 8. Open secondary async event socket to port 55741
+   * Passive Tethering Session Initialization for Fujifilm X-T10:
+   * 1. OpenSession (0x1002, SessionID = 1) -> expect 0x2001 OK
+   * 2. After OpenSession, DO NOT send 0xDF01=5 or 0x101C (EnterCameraRemote) so camera LCD/EVF remains on
+   * 3. Do NOT poll Live View frames
+   * 4. Open secondary async event socket on port 55741 with PTPIP_INIT_EVENT_REQ
+   * 5. Listen passively for Event 0x4002 (ObjectAdded)
+   * 6. When ObjectAdded is detected, fetch photo via GetObject (0x1009) or 0x9022
    */
   private func performFujiSessionInitialization(
     connection: NWConnection,
@@ -822,91 +821,15 @@ class CameraBridgeManager: NSObject, FlutterStreamHandler, ICDeviceBrowserDelega
       label: "OpenSession(0x1002)"
     ) { [weak self] (ok1, _) in
       guard let self = self, ok1 else {
+        self?.logPtpIp("OpenSession(0x1002) failed")
         completion(false)
         return
       }
 
-      // 2. Two-Part 0x1016 on 0xDF01 = 0x0005 (Remote Mode)
-      self.sendFujiTwoPartCommand(
-        connection: connection,
-        propCodePayload: [0x01, 0xDF, 0x00, 0x00],
-        valuePayload: [0x05, 0x00],
-        label: "SetInitMode(0xDF01=5)"
-      ) { [weak self] ok2 in
-        guard let self = self, ok2 else {
-          completion(false)
-          return
-        }
-
-        // 3. Single-Part 0x1015 on 0xDF24
-        self.sendFujiSingleCommand(
-          connection: connection,
-          type: 0x1015,
-          payload: [0x24, 0xDF, 0x00, 0x00],
-          label: "GetRemoteModeVersion(0xDF24)"
-        ) { [weak self] (ok3, _) in
-          guard let self = self, ok3 else {
-            completion(false)
-            return
-          }
-
-          // 4. Two-Part 0x1016 on 0xDF24 = FF 00 02 00
-          self.sendFujiTwoPartCommand(
-            connection: connection,
-            propCodePayload: [0x24, 0xDF, 0x00, 0x00],
-            valuePayload: [0xFF, 0x00, 0x02, 0x00],
-            label: "SetRemoteModeConfig(0xDF24)"
-          ) { [weak self] ok4 in
-            guard let self = self, ok4 else {
-              completion(false)
-              return
-            }
-
-            // 5. Camera Capabilities (0x902B)
-            self.sendFujiSingleCommand(
-              connection: connection,
-              type: 0x902B,
-              payload: [],
-              label: "CameraCapabilities(0x902B)"
-            ) { [weak self] (ok5, _) in
-              guard let self = self, ok5 else {
-                completion(false)
-                return
-              }
-
-              // 6. Camera Remote Activation (0x101C) - transitions camera screen out of "Waiting for connection"!
-              self.sendFujiSingleCommand(
-                connection: connection,
-                type: 0x101C,
-                payload: [0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00],
-                label: "EnterCameraRemote(0x101C)"
-              ) { [weak self] (ok6, _) in
-                guard let self = self, ok6 else {
-                  completion(false)
-                  return
-                }
-
-                // 7. Initial Status Poll (0x1015 on 0xD212)
-                self.sendFujiSingleCommand(
-                  connection: connection,
-                  type: 0x1015,
-                  payload: [0x12, 0xD2, 0x00, 0x00],
-                  label: "StatusRequest(0xD212)"
-                ) { [weak self] (ok7, _) in
-                  guard let self = self, ok7 else {
-                    completion(false)
-                    return
-                  }
-
-                  // 8. Connect secondary async event socket on port 55741
-                  self.connectFujiEventSocket(host: host)
-                  completion(true)
-                }
-              }
-            }
-          }
-        }
-      }
+      self.logPtpIp("OpenSession succeeded! Initializing passive event socket on port 55741...")
+      // Connect secondary async event socket on port 55741
+      self.connectFujiEventSocket(host: host)
+      completion(true)
     }
   }
 
@@ -917,36 +840,172 @@ class CameraBridgeManager: NSObject, FlutterStreamHandler, ICDeviceBrowserDelega
     let evConn = NWConnection(host: nwHost, port: nwPort, using: .tcp)
     self.fujiEventConnection = evConn
     evConn.stateUpdateHandler = { [weak self] state in
-      if case .ready = state {
-        self?.logPtpIp("Fujifilm Async Event Socket connected to \(host):55741")
+      guard let self = self else { return }
+      switch state {
+      case .ready:
+        self.logPtpIp("Fujifilm Async Event Socket connected to \(host):55741. Sending InitEventRequest...")
+        self.sendFujiInitEventRequest(connection: evConn)
+      case .failed(let err):
+        self.logPtpIp("Fujifilm Event Socket failed: \(err)")
+      case .cancelled:
+        self.logPtpIp("Fujifilm Event Socket cancelled")
+      default:
+        break
       }
     }
     evConn.start(queue: .global(qos: .userInitiated))
   }
 
-  private func startFujiKeepAlivePolling(connection: NWConnection) {
-    fujiKeepAliveTimer?.cancel()
-    let timer = DispatchSource.makeTimerSource(queue: .global(qos: .utility))
-    timer.schedule(deadline: .now() + 2.0, repeating: 2.0)
-    timer.setEventHandler { [weak self] in
-      guard let self = self, self.isConnected, !self.isBusyWithCommand else { return }
-      self.isBusyWithCommand = true
-      self.sendFujiSingleCommand(
-        connection: connection,
-        type: 0x1015,
-        payload: [0x12, 0xD2, 0x00, 0x00],
-        label: "KeepAliveStatus(0xD212)"
-      ) { [weak self] (ok, _) in
-        guard let self = self else { return }
-        self.isBusyWithCommand = false
-        if !ok && self.isConnected {
-          self.logPtpIp("Fujifilm KeepAlive failed; camera disconnected.")
-          self.disconnect()
+  private func sendFujiInitEventRequest(connection: NWConnection) {
+    // PTPIP_INIT_EVENT_REQ: Length 12 (LE), Type 3 (LE), ConnectionNumber (4 bytes LE)
+    var evPacket = Data(count: 12)
+    var lenLE = UInt32(12).littleEndian
+    var typeLE = UInt32(3).littleEndian // PTPIP_INIT_EVENT_REQ
+    var connNumLE = self.connectionNumber.littleEndian
+    evPacket.replaceSubrange(0..<4, with: Data(bytes: &lenLE, count: 4))
+    evPacket.replaceSubrange(4..<8, with: Data(bytes: &typeLE, count: 4))
+    evPacket.replaceSubrange(8..<12, with: Data(bytes: &connNumLE, count: 4))
+
+    let txHex = evPacket.map { String(format: "%02hhX", $0) }.joined(separator: " ")
+    logPtpIp("TX InitEventRequest (\(evPacket.count) bytes, connNum=\(self.connectionNumber)): \(txHex)")
+
+    connection.send(content: evPacket, completion: .contentProcessed { [weak self] err in
+      guard let self = self, err == nil else {
+        self?.logPtpIp("Error sending InitEventRequest: \(String(describing: err))")
+        return
+      }
+      self.logPtpIp("InitEventRequest sent. Now passively listening for PTP events on port 55741...")
+      self.listenFujiEventPackets(connection: connection)
+    })
+  }
+
+  private func listenFujiEventPackets(connection: NWConnection) {
+    receiveFujiPacket(connection: connection) { [weak self] packet in
+      guard let self = self, self.isConnected else { return }
+      guard let packet = packet, packet.count >= 8 else {
+        self.logPtpIp("Event socket closed or read error")
+        return
+      }
+
+      let pType = UInt32(littleEndian: packet.subdata(in: 4..<8).withUnsafeBytes { $0.load(as: UInt32.self) })
+      if pType == 4 { // PTPIP_INIT_EVENT_ACK
+        self.logPtpIp("RX InitEventAck from camera!")
+      } else if pType == 8 { // PTPIP_EVENT
+        // Packet layout:
+        // [0..3]: Length (UInt32 LE)
+        // [4..7]: Type = 8 (PTPIP_EVENT)
+        // [8..9]: EventCode (UInt16 LE)
+        // [10..13]: TransactionID (UInt32 LE)
+        // [14..17]: Parameter 1 (UInt32 LE, e.g. ObjectHandle)
+        if packet.count >= 10 {
+          let eventCode = UInt16(littleEndian: packet.subdata(in: 8..<10).withUnsafeBytes { $0.load(as: UInt16.self) })
+          let objHandle = packet.count >= 18 ? UInt32(littleEndian: packet.subdata(in: 14..<18).withUnsafeBytes { $0.load(as: UInt32.self) }) : 0
+          self.logPtpIp(String(format: "RX PTP Event: 0x%04X, Handle: 0x%08X", eventCode, objHandle))
+          if eventCode == 0x4002 || eventCode == 0xC101 { // ObjectAdded
+            self.logPtpIp("PTP Event ObjectAdded detected! Fetching photo from camera...")
+            self.fetchFujiPhoto(objectHandle: objHandle)
+          }
         }
       }
+
+      // Continue passive event listening
+      if self.isConnected {
+        self.listenFujiEventPackets(connection: connection)
+      }
     }
-    self.fujiKeepAliveTimer = timer
-    timer.resume()
+  }
+
+  private func fetchFujiPhoto(objectHandle: UInt32) {
+    guard let conn = activeConnection, isConnected, !isBusyWithCommand else { return }
+    isBusyWithCommand = true
+    logPtpIp("Requesting captured photo (handle: 0x\(String(format: "%08X", objectHandle)))...")
+
+    let onDataReceived = { [weak self] (dataPackets: [Data]) in
+      guard let self = self else { return }
+      self.isBusyWithCommand = false
+
+      var fullData = Data()
+      for packet in dataPackets {
+        if packet.count > 12 {
+          // Skip 4-byte length + 2-byte index + 2-byte type + 4-byte id
+          fullData.append(packet.subdata(in: 12..<packet.count))
+        }
+      }
+
+      var jpegBytes: Data? = nil
+      if let jpegStart = fullData.range(of: Data([0xFF, 0xD8])) {
+        jpegBytes = fullData.subdata(in: jpegStart.lowerBound..<fullData.count)
+      } else if !fullData.isEmpty {
+        jpegBytes = fullData
+      }
+
+      let photoId = "fuji_\(Int(Date().timeIntervalSince1970 * 1000))"
+      let fileName = "DSCF_\(Int.random(in: 1000...9999)).JPG"
+      var fullResPath: String? = nil
+      if let jpegBytes = jpegBytes, !jpegBytes.isEmpty {
+        let cacheDir = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask).first ?? FileManager.default.temporaryDirectory
+        let destDir = cacheDir.appendingPathComponent("photoe_zi_tether", isDirectory: true)
+        try? FileManager.default.createDirectory(at: destDir, withIntermediateDirectories: true, attributes: nil)
+        let fileUrl = destDir.appendingPathComponent(fileName)
+        try? jpegBytes.write(to: fileUrl)
+        fullResPath = fileUrl.path
+        self.logPtpIp("Saved photo to \(fullResPath ?? "cache") (\(jpegBytes.count) bytes)")
+      }
+
+      let payload: [String: Any] = [
+        "id": photoId,
+        "fileName": fileName,
+        "previewBytes": (jpegBytes != nil && !jpegBytes!.isEmpty) ? FlutterStandardTypedData(bytes: jpegBytes!) : NSNull(),
+        "fullResLocalPath": (fullResPath != nil) ? fullResPath! : NSNull(),
+        "capturedAt": Int(Date().timeIntervalSince1970 * 1000),
+        "exif": [
+          "cameraModel": "Fujifilm X-T10 (Wi-Fi)",
+          "aperture": "f/2.0",
+          "shutterSpeed": "1/250s",
+          "iso": 400,
+          "focalLength": "35mm"
+        ]
+      ]
+      self.sendEvent(type: "photoAdded", data: payload)
+    }
+
+    if objectHandle != 0 {
+      var handleLE = objectHandle.littleEndian
+      var handlePayload = [UInt8](repeating: 0, count: 4)
+      withUnsafeBytes(of: &handleLE) { handlePayload = Array($0) }
+
+      self.sendFujiSingleCommand(
+        connection: conn,
+        type: 0x1009, // GetObject
+        payload: handlePayload,
+        label: "GetObject(0x1009)"
+      ) { [weak self] (ok, dataPackets) in
+        guard let self = self else { return }
+        if ok && !dataPackets.isEmpty {
+          onDataReceived(dataPackets)
+        } else {
+          // Fallback to 0x9022 (CameraLastImage)
+          self.logPtpIp("GetObject returned empty; falling back to 0x9022 (CameraLastImage)...")
+          self.sendFujiSingleCommand(
+            connection: conn,
+            type: 0x9022,
+            payload: [],
+            label: "CameraLastImage(0x9022)"
+          ) { (_, fbPackets) in
+            onDataReceived(fbPackets)
+          }
+        }
+      }
+    } else {
+      self.sendFujiSingleCommand(
+        connection: conn,
+        type: 0x9022,
+        payload: [],
+        label: "CameraLastImage(0x9022)"
+      ) { (_, dataPackets) in
+        onDataReceived(dataPackets)
+      }
+    }
   }
 
   private func startFujiLiveViewStream() {
@@ -1067,6 +1126,10 @@ class CameraBridgeManager: NSObject, FlutterStreamHandler, ICDeviceBrowserDelega
 
       let ackType = UInt32(littleEndian: data.subdata(in: 4..<8).withUnsafeBytes { $0.load(as: UInt32.self) })
       if ackType == 2 { // PTPIP_INIT_COMMAND_ACK = 0x00000002
+        if data.count >= 12 {
+          self.connectionNumber = UInt32(littleEndian: data.subdata(in: 8..<12).withUnsafeBytes { $0.load(as: UInt32.self) })
+          self.logPtpIp("Extracted PTP/IP connectionNumber: \(self.connectionNumber)")
+        }
         completion(true)
       } else {
         self.logPtpIp("Unexpected Ack packet type: \(ackType)")
