@@ -442,7 +442,7 @@ class CameraBridgeManager: NSObject, FlutterStreamHandler, ICDeviceBrowserDelega
     }
 
     let version: UInt32 = 0x00010000
-    let packetLen = UInt32(4 + 4 + 16 + nameData.count + 4)
+    let packetLen = UInt32(28 + nameData.count)
     var packet = Data()
     var pLen = packetLen.littleEndian
     var pType = UInt32(1).littleEndian
@@ -492,8 +492,8 @@ class CameraBridgeManager: NSObject, FlutterStreamHandler, ICDeviceBrowserDelega
   }
 
   private func waitForInitCommandAck(connection: NWConnection, completion: @escaping (Bool) -> Void) {
-    connection.receive(minimumIncompleteLength: 8, maximumLength: 8) { [weak self] (data, _, _, error) in
-      guard let self = self, error == nil, let data = data, data.count == 8 else {
+    connection.receive(minimumIncompleteLength: 8, maximumLength: 8) { (data, _, _, error) in
+      guard error == nil, let data = data, data.count == 8 else {
         completion(false)
         return
       }
@@ -519,7 +519,7 @@ class CameraBridgeManager: NSObject, FlutterStreamHandler, ICDeviceBrowserDelega
   private func sendOpenSession(connection: NWConnection, completion: @escaping (Bool) -> Void) {
     // PTPIP_CMD_REQ: Type 6, DataPhase 1, OpCode 0x1002, TransID 1, SessionID 1
     var openSessionPacket = Data()
-    let opLen = UInt32(4 + 4 + 4 + 2 + 4 + 4) // 22 bytes
+    let opLen: UInt32 = 22
     var opLenLE = opLen.littleEndian
     var opTypeLE = UInt32(6).littleEndian // PTPIP_CMD_REQ
     var dataPhaseLE = UInt32(1).littleEndian
