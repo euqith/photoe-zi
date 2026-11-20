@@ -77,7 +77,8 @@ class CanonNativeCameraDriver implements BaseCameraDriver {
       final id = map['id']?.toString() ??
           'photo_${DateTime.now().millisecondsSinceEpoch}';
       final fileName = map['fileName']?.toString() ?? 'IMG_0001.JPG';
-      final previewBytes = map['previewBytes'] as Uint8List?;
+      Uint8List? previewBytes = map['previewBytes'] as Uint8List?;
+      final fullResLocalPath = map['fullResLocalPath']?.toString();
       final capturedAtMs = map['capturedAt'] as int?;
       final capturedAt = capturedAtMs != null
           ? DateTime.fromMillisecondsSinceEpoch(capturedAtMs)
@@ -86,11 +87,22 @@ class CanonNativeCameraDriver implements BaseCameraDriver {
         (map['exif'] as Map?) ?? <String, dynamic>{},
       );
 
+      // If previewBytes is missing but fullResLocalPath is available on disk, load directly!
+      if ((previewBytes == null || previewBytes.isEmpty) &&
+          fullResLocalPath != null) {
+        final f = File(fullResLocalPath);
+        if (f.existsSync()) {
+          try {
+            previewBytes = f.readAsBytesSync();
+          } catch (_) {}
+        }
+      }
+
       final photo = IncomingPhoto(
         id: id,
         fileName: fileName,
         previewBytes: previewBytes,
-        fullResLocalPath: null,
+        fullResLocalPath: fullResLocalPath,
         exifData: exif,
         capturedAt: capturedAt,
       );

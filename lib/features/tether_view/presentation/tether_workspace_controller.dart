@@ -324,8 +324,19 @@ class TetherWorkspaceController extends StateNotifier<TetherSessionState> {
     final updatedPreviews =
         Map<String, Uint8List>.from(state.inMemoryPreviews);
 
-    if (incoming.previewBytes != null) {
-      updatedPreviews[incoming.id] = incoming.previewBytes!;
+    Uint8List? displayBytes = incoming.previewBytes;
+    if ((displayBytes == null || displayBytes.isEmpty) &&
+        incoming.fullResLocalPath != null) {
+      final f = File(incoming.fullResLocalPath!);
+      if (f.existsSync()) {
+        try {
+          displayBytes = f.readAsBytesSync();
+        } catch (_) {}
+      }
+    }
+
+    if (displayBytes != null && displayBytes.isNotEmpty) {
+      updatedPreviews[incoming.id] = displayBytes;
       try {
         final previewDir = Directory(
           p.join(Directory.systemTemp.path, 'photoe_zi_previews'),
@@ -334,7 +345,7 @@ class TetherWorkspaceController extends StateNotifier<TetherSessionState> {
           await previewDir.create(recursive: true);
         }
         previewPath = p.join(previewDir.path, '${incoming.id}_thumb.jpg');
-        await File(previewPath).writeAsBytes(incoming.previewBytes!);
+        await File(previewPath).writeAsBytes(displayBytes);
       } catch (_) {}
     }
 
@@ -356,11 +367,18 @@ class TetherWorkspaceController extends StateNotifier<TetherSessionState> {
       if (state.autoUploadMode == AutoUploadMode.all) {
         await enqueuePhotoForUpload(incoming.id);
       }
-    } else if (incoming.fullResLocalPath != null) {
-      await db.updatePhotoFullResPath(incoming.id, incoming.fullResLocalPath!);
-      unawaited(
-        _autoBakeFullResInBackground(incoming.id, incoming.fullResLocalPath!),
-      );
+    } else {
+      if (incoming.fullResLocalPath != null) {
+        await db.updatePhotoFullResPath(incoming.id, incoming.fullResLocalPath!);
+        unawaited(
+          _autoBakeFullResInBackground(incoming.id, incoming.fullResLocalPath!),
+        );
+      }
+      if (existingPhoto.previewPath == null && previewPath != null) {
+        await db.upsertPhoto(
+          existingPhoto.toCompanion(true).copyWith(previewPath: Value(previewPath)),
+        );
+      }
     }
 
     if (!mounted) return;

@@ -210,20 +210,78 @@ class CameraBridgeManager: NSObject, FlutterStreamHandler, ICDeviceBrowserDelega
   func cameraDevice(_ camera: ICCameraDevice, didAdd items: [ICCameraItem]) {
     for item in items {
       guard let file = item as? ICCameraFile else { continue }
-      let photoPayload: [String: Any] = [
-        "id": "usb_\(file.name ?? "\(Date().timeIntervalSince1970)")",
-        "fileName": file.name ?? "IMG_\(Int.random(in: 1000...9999)).JPG",
-        "previewBytes": NSNull(),
-        "capturedAt": Int(file.creationDate?.timeIntervalSince1970 ?? Date().timeIntervalSince1970) * 1000,
-        "exif": [
-          "cameraModel": camera.name ?? "Canon EOS (USB)",
-          "aperture": "f/2.8",
-          "shutterSpeed": "1/160s",
-          "iso": 200,
-          "focalLength": "50mm"
+      let photoId = "usb_\(file.name ?? "\(Date().timeIntervalSince1970)")"
+      let fileName = file.name ?? "IMG_\(Int.random(in: 1000...9999)).JPG"
+      let capturedAt = Int(file.creationDate?.timeIntervalSince1970 ?? Date().timeIntervalSince1970) * 1000
+
+      // 1. Request embedded thumbnail immediately
+      file.requestThumbnailData(options: nil) { [weak self] (thumbnailData, thumbError) in
+        guard let self = self else { return }
+        var thumbBytes: FlutterStandardTypedData? = nil
+        if let data = thumbnailData, !data.isEmpty {
+          thumbBytes = FlutterStandardTypedData(bytes: data)
+        }
+
+        // If thumbnail is available immediately, dispatch stage 1
+        if let thumbBytes = thumbBytes {
+          let stage1Payload: [String: Any] = [
+            "id": photoId,
+            "fileName": fileName,
+            "previewBytes": thumbBytes,
+            "fullResLocalPath": NSNull(),
+            "capturedAt": capturedAt,
+            "exif": [
+              "cameraModel": camera.name ?? "Canon EOS (USB)",
+              "aperture": "f/2.8",
+              "shutterSpeed": "1/160s",
+              "iso": 200,
+              "focalLength": "50mm"
+            ]
+          ]
+          self.sendEvent(type: "photoAdded", data: stage1Payload)
+        }
+
+        // 2. Download full resolution file to local app cache directory
+        let cacheDir = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask).first ?? FileManager.default.temporaryDirectory
+        let destDir = cacheDir.appendingPathComponent("photoe_zi_tether", isDirectory: true)
+        try? FileManager.default.createDirectory(at: destDir, withIntermediateDirectories: true, attributes: nil)
+
+        let downloadOptions: [ICDownloadOption: Any] = [
+          .downloadsDirectoryURL: destDir,
+          .saveAsFilename: fileName
         ]
-      ]
-      self.sendEvent(type: "photoAdded", data: photoPayload)
+
+        _ = file.requestDownload(options: downloadOptions) { [weak self] (savedFilename, downloadError) in
+          guard let self = self else { return }
+          var fullResPath: String? = nil
+          if let savedFilename = savedFilename {
+            fullResPath = destDir.appendingPathComponent(savedFilename).path
+          } else {
+            fullResPath = destDir.appendingPathComponent(fileName).path
+          }
+
+          // If thumbnail was nil, load image data from the saved file on disk
+          if thumbBytes == nil, let fullResPath = fullResPath, let fileData = try? Data(contentsOf: URL(fileURLWithPath: fullResPath)) {
+            thumbBytes = FlutterStandardTypedData(bytes: fileData)
+          }
+
+          let stage2Payload: [String: Any] = [
+            "id": photoId,
+            "fileName": fileName,
+            "previewBytes": (thumbBytes != nil) ? thumbBytes! : NSNull(),
+            "fullResLocalPath": (fullResPath != nil) ? fullResPath! : NSNull(),
+            "capturedAt": capturedAt,
+            "exif": [
+              "cameraModel": camera.name ?? "Canon EOS (USB)",
+              "aperture": "f/2.8",
+              "shutterSpeed": "1/160s",
+              "iso": 200,
+              "focalLength": "50mm"
+            ]
+          ]
+          self.sendEvent(type: "photoAdded", data: stage2Payload)
+        }
+      }
     }
   }
 
