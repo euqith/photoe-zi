@@ -546,6 +546,17 @@ class TetherWorkspaceController extends StateNotifier<TetherSessionState> {
     );
   }
 
+  Future<UploadAllSummary> uploadAllPhotosForCurrentSession() async {
+    final folderId = state.driveFolderId ?? 'TetherApp_Root';
+    final summary = await cloudSync.uploadAllPhotos(
+      sessionId: state.activeSessionId,
+      driveFolderId: folderId,
+      variant: state.uploadVariant,
+      activeLutId: state.activeLutId,
+    );
+    return summary;
+  }
+
   Future<String> prepareShareableSessionLink() async {
     final folderId = state.driveFolderId ?? state.shareableFolderUrl;
     final link = await cloudSync.generateShareableFolderLink(folderId);

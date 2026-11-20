@@ -21,6 +21,7 @@ class DriveSyncInspectorPanel extends StatelessWidget {
   final ValueChanged<UploadVariant> onUploadVariantChanged;
   final ValueChanged<bool> onToggleOffline;
   final VoidCallback onRetryFailed;
+  final VoidCallback? onUploadAll;
   final VoidCallback onShowQrModal;
 
   const DriveSyncInspectorPanel({
@@ -41,6 +42,7 @@ class DriveSyncInspectorPanel extends StatelessWidget {
     required this.onUploadVariantChanged,
     required this.onToggleOffline,
     required this.onRetryFailed,
+    this.onUploadAll,
     required this.onShowQrModal,
   });
 
@@ -361,6 +363,37 @@ class DriveSyncInspectorPanel extends StatelessWidget {
                   style: const TextStyle(
                     fontSize: 10.5,
                     color: StudioColors.statusError,
+                  ),
+                ),
+              ),
+            ),
+          ],
+
+          if (onUploadAll != null) ...[
+            const SizedBox(height: 8),
+            SizedBox(
+              width: double.infinity,
+              height: 30,
+              child: OutlinedButton.icon(
+                key: const Key('btn_upload_all_photos'),
+                onPressed: onUploadAll,
+                style: OutlinedButton.styleFrom(
+                  side: const BorderSide(color: StudioColors.accentAmber),
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(6),
+                  ),
+                ),
+                icon: const Icon(
+                  Icons.cloud_upload_outlined,
+                  size: 14,
+                  color: StudioColors.accentAmber,
+                ),
+                label: const Text(
+                  'Upload All Pictures',
+                  style: TextStyle(
+                    fontSize: 11,
+                    fontWeight: FontWeight.w600,
+                    color: StudioColors.accentAmber,
                   ),
                 ),
               ),

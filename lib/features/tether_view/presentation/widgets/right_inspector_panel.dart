@@ -36,6 +36,7 @@ class RightInspectorPanel extends StatelessWidget {
   final ValueChanged<UploadVariant> onUploadVariantChanged;
   final ValueChanged<bool> onToggleOffline;
   final VoidCallback onRetryFailed;
+  final VoidCallback? onUploadAll;
   final VoidCallback onShowQrModal;
 
   const RightInspectorPanel({
@@ -68,6 +69,7 @@ class RightInspectorPanel extends StatelessWidget {
     required this.onUploadVariantChanged,
     required this.onToggleOffline,
     required this.onRetryFailed,
+    this.onUploadAll,
     required this.onShowQrModal,
   });
 
@@ -233,6 +235,7 @@ class RightInspectorPanel extends StatelessWidget {
             onUploadVariantChanged: onUploadVariantChanged,
             onToggleOffline: onToggleOffline,
             onRetryFailed: onRetryFailed,
+            onUploadAll: onUploadAll,
             onShowQrModal: onShowQrModal,
           ),
         ],

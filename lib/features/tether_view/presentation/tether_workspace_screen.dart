@@ -314,6 +314,7 @@ class _TetherWorkspaceScreenState
             onUploadVariantChanged: controller.setUploadVariant,
             onToggleOffline: controller.setOfflineMode,
             onRetryFailed: controller.retryFailedUploads,
+            onUploadAll: () => _handleUploadAll(context, controller),
             onShowQrModal: () async {
               final shareUrl = await controller.prepareShareableSessionLink();
               if (!mounted) return;
@@ -577,6 +578,7 @@ class _TetherWorkspaceScreenState
                         onUploadVariantChanged: controller.setUploadVariant,
                         onToggleOffline: controller.setOfflineMode,
                         onRetryFailed: controller.retryFailedUploads,
+                        onUploadAll: () => _handleUploadAll(context, controller),
                         onShowQrModal: () async {
                           final shareUrl =
                               await controller.prepareShareableSessionLink();
@@ -1093,6 +1095,35 @@ class _TetherWorkspaceScreenState
             ],
           ),
         ),
+      ),
+    );
+  }
+
+  Future<void> _handleUploadAll(
+    BuildContext context,
+    TetherWorkspaceController controller,
+  ) async {
+    final summary = await controller.uploadAllPhotosForCurrentSession();
+    if (!context.mounted) return;
+
+    final String message;
+    if (summary.totalPhotos == 0) {
+      message = 'No photos in current session to upload.';
+    } else if (summary.allSkipped) {
+      message =
+          'All ${summary.totalPhotos} photos already exist in Google Drive (0 duplicates uploaded).';
+    } else if (summary.hasSkipped) {
+      message =
+          'Queued ${summary.enqueuedCount} new photo(s) for upload (${summary.skippedCount} already in Google Drive skipped).';
+    } else {
+      message =
+          'Queued all ${summary.enqueuedCount} photo(s) for upload to Google Drive.';
+    }
+
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(message),
+        duration: const Duration(seconds: 4),
       ),
     );
   }

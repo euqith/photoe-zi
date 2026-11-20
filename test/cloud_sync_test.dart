@@ -506,4 +506,257 @@ void main() {
           .setMockMethodCallHandler(channel, null);
     });
   });
+
+  group(
+      'Issue #3.13 — Upload All Pictures with Google Drive Deduplication', () {
+    test(
+        'uploadAllPhotos enqueues all photos when nothing exists remotely or in queue',
+        () async {
+      await db.createSession(
+        SessionsCompanion.insert(
+          id: 'session_upload_all_1',
+          name: 'Session_All_1',
+          createdAt: DateTime.now(),
+        ),
+      );
+
+      final p1 = await createSampleJpegFile('IMG_1001.JPG');
+      final p2 = await createSampleJpegFile('IMG_1002.JPG');
+
+      await db.upsertPhoto(
+        PhotosCompanion.insert(
+          id: 'p_1001',
+          sessionId: 'session_upload_all_1',
+          fileName: 'IMG_1001.JPG',
+          fullResPath: Value(p1),
+          capturedAt: DateTime.now(),
+        ),
+      );
+      await db.upsertPhoto(
+        PhotosCompanion.insert(
+          id: 'p_1002',
+          sessionId: 'session_upload_all_1',
+          fileName: 'IMG_1002.JPG',
+          fullResPath: Value(p2),
+          capturedAt: DateTime.now(),
+        ),
+      );
+
+      syncService.setOfflineMode(true); // Keep offline to inspect queue items
+
+      final summary = await syncService.uploadAllPhotos(
+        sessionId: 'session_upload_all_1',
+        driveFolderId: 'folder_upload_all_1',
+        variant: UploadVariant.bakedLut,
+      );
+
+      expect(summary.totalPhotos, 2);
+      expect(summary.enqueuedCount, 2);
+      expect(summary.skippedCount, 0);
+      expect(summary.hasSkipped, isFalse);
+      expect(summary.allSkipped, isFalse);
+
+      final queue = await db.getAllUploadQueueItems();
+      expect(queue.length, 2);
+    });
+
+    test(
+        'uploadAllPhotos skips photos already completed in local queue to prevent duplicate uploads',
+        () async {
+      await db.createSession(
+        SessionsCompanion.insert(
+          id: 'session_upload_all_2',
+          name: 'Session_All_2',
+          createdAt: DateTime.now(),
+        ),
+      );
+
+      final p1 = await createSampleJpegFile('IMG_2001.JPG');
+      final p2 = await createSampleJpegFile('IMG_2002.JPG');
+
+      await db.upsertPhoto(
+        PhotosCompanion.insert(
+          id: 'p_2001',
+          sessionId: 'session_upload_all_2',
+          fileName: 'IMG_2001.JPG',
+          fullResPath: Value(p1),
+          capturedAt: DateTime.now(),
+        ),
+      );
+      await db.upsertPhoto(
+        PhotosCompanion.insert(
+          id: 'p_2002',
+          sessionId: 'session_upload_all_2',
+          fileName: 'IMG_2002.JPG',
+          fullResPath: Value(p2),
+          capturedAt: DateTime.now(),
+        ),
+      );
+
+      // p_2001 is already completed
+      await db.enqueueUpload(
+        UploadQueueCompanion.insert(
+          id: 'uq_p_2001',
+          photoId: 'p_2001',
+          variant: 'bakedLut',
+          status: const Value('completed'),
+          remoteFileId: const Value('remote_drive_file_2001'),
+          progress: const Value(1.0),
+        ),
+      );
+
+      syncService.setOfflineMode(true);
+
+      final summary = await syncService.uploadAllPhotos(
+        sessionId: 'session_upload_all_2',
+        driveFolderId: 'folder_upload_all_2',
+        variant: UploadVariant.bakedLut,
+      );
+
+      expect(summary.totalPhotos, 2);
+      expect(summary.enqueuedCount, 1);
+      expect(summary.skippedCount, 1);
+      expect(summary.skippedPhotoNames, contains('IMG_2001.JPG'));
+
+      // Re-running uploadAllPhotos when both are completed should skip all
+      await db.enqueueUpload(
+        UploadQueueCompanion.insert(
+          id: 'uq_p_2002',
+          photoId: 'p_2002',
+          variant: 'bakedLut',
+          status: const Value('completed'),
+          remoteFileId: const Value('remote_drive_file_2002'),
+          progress: const Value(1.0),
+        ),
+      );
+
+      final summary2 = await syncService.uploadAllPhotos(
+        sessionId: 'session_upload_all_2',
+        driveFolderId: 'folder_upload_all_2',
+        variant: UploadVariant.bakedLut,
+      );
+
+      expect(summary2.totalPhotos, 2);
+      expect(summary2.enqueuedCount, 0);
+      expect(summary2.skippedCount, 2);
+      expect(summary2.allSkipped, isTrue);
+    });
+
+    test(
+        'uploadAllPhotos checks remote Google Drive files.list and deduplicates against remote files',
+        () async {
+      await db.createSession(
+        SessionsCompanion.insert(
+          id: 'session_remote_check',
+          name: 'Session_Remote',
+          createdAt: DateTime.now(),
+        ),
+      );
+
+      final p1 = await createSampleJpegFile('IMG_3001.JPG');
+      final p2 = await createSampleJpegFile('IMG_3002.JPG');
+
+      await db.upsertPhoto(
+        PhotosCompanion.insert(
+          id: 'p_3001',
+          sessionId: 'session_remote_check',
+          fileName: 'IMG_3001.JPG',
+          fullResPath: Value(p1),
+          capturedAt: DateTime.now(),
+        ),
+      );
+      await db.upsertPhoto(
+        PhotosCompanion.insert(
+          id: 'p_3002',
+          sessionId: 'session_remote_check',
+          fileName: 'IMG_3002.JPG',
+          fullResPath: Value(p2),
+          capturedAt: DateTime.now(),
+        ),
+      );
+
+      bool driveListCalled = false;
+      final mockHttp = MockClient((http.Request request) async {
+        if (request.url.path.contains('/drive/v3/about')) {
+          return http.Response(
+            jsonEncode({
+              'user': {
+                'emailAddress': 'test@photoe-zi.app',
+                'displayName': 'Test User',
+              }
+            }),
+            200,
+          );
+        }
+        if (request.url.path == '/drive/v3/files' && request.method == 'GET') {
+          driveListCalled = true;
+          expect(request.url.queryParameters['q'], contains('1RealFolderRemote999'));
+          // Remote drive already contains IMG_3001.JPG
+          return http.Response(
+            jsonEncode({
+              'files': [
+                {
+                  'id': 'gdrive_file_3001',
+                  'name': 'IMG_3001.JPG',
+                  'mimeType': 'image/jpeg',
+                },
+              ],
+            }),
+            200,
+          );
+        }
+        if (request.url.path.contains('/upload/drive/v3/files')) {
+          return http.Response(
+            'OK',
+            200,
+            headers: {
+              'location':
+                  'https://www.googleapis.com/upload/drive/v3/session_upload_3002'
+            },
+          );
+        }
+        if (request.url.path.contains('session_upload_3002')) {
+          return http.Response(
+            jsonEncode({'id': 'gdrive_uploaded_3002'}),
+            200,
+          );
+        }
+        return http.Response('OK', 200);
+      });
+
+      final serviceWithRemote = GoogleDriveCloudSyncService(
+        db: db,
+        lutManager: lutManager,
+        lutBaker: const LutBakerService(),
+        httpClient: mockHttp,
+      );
+
+      await serviceWithRemote.signIn(
+        email: 'test@photoe-zi.app',
+        accessToken: 'ya29.remote_check_token_123',
+      );
+
+      final summary = await serviceWithRemote.uploadAllPhotos(
+        sessionId: 'session_remote_check',
+        driveFolderId: '1RealFolderRemote999',
+        variant: UploadVariant.bakedLut,
+      );
+
+      expect(driveListCalled, isTrue);
+      expect(summary.totalPhotos, 2);
+      expect(summary.skippedCount, 1);
+      expect(summary.skippedPhotoNames, ['IMG_3001.JPG']);
+      expect(summary.enqueuedCount, 1);
+
+      // Wait briefly for queue to process the single enqueued photo
+      await Future<void>.delayed(const Duration(milliseconds: 150));
+
+      final queue = await db.getAllUploadQueueItems();
+      final enqueuedItem =
+          queue.firstWhere((item) => item.photoId == 'p_3002');
+      expect(enqueuedItem.status, anyOf('pending', 'uploading', 'completed'));
+
+      serviceWithRemote.dispose();
+    });
+  });
 }

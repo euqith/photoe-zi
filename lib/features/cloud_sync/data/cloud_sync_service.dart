@@ -4,6 +4,23 @@ enum UploadVariant { bakedLut, original, both }
 
 enum AutoUploadMode { all, favoritesOnly, manual }
 
+class UploadAllSummary {
+  final int totalPhotos;
+  final int enqueuedCount;
+  final int skippedCount;
+  final List<String> skippedPhotoNames;
+
+  const UploadAllSummary({
+    required this.totalPhotos,
+    required this.enqueuedCount,
+    required this.skippedCount,
+    this.skippedPhotoNames = const [],
+  });
+
+  bool get hasSkipped => skippedCount > 0;
+  bool get allSkipped => totalPhotos > 0 && enqueuedCount == 0;
+}
+
 class GoogleDriveAccount {
   final String email;
   final String displayName;
@@ -63,6 +80,13 @@ abstract class CloudSyncService {
     required UploadVariant variant,
     String? activeLutId,
   });
+  Future<UploadAllSummary> uploadAllPhotos({
+    required String sessionId,
+    required String driveFolderId,
+    required UploadVariant variant,
+    String? activeLutId,
+  });
+  Future<Set<String>> getExistingFileNamesInDriveFolder(String driveFolderId);
   Future<void> retryFailedUploads();
   Future<String> generateShareableFolderLink(String driveFolderId);
   Stream<Map<String, double>> get uploadProgressStream;

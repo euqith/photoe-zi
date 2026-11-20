@@ -37,6 +37,7 @@ class GoogleDriveCloudSyncService implements CloudSyncService {
   final Map<String, String> _sessionFolderNames = {};
   final Map<String, String> _subfolderCache = {};
   final Set<String> _publicSharedFolders = {};
+  final Map<String, Set<String>> _remoteFilesByFolder = {};
 
   GoogleDriveCloudSyncService({
     required this.db,
@@ -564,6 +565,165 @@ class GoogleDriveCloudSyncService implements CloudSyncService {
     }
   }
 
+  @override
+  Future<Set<String>> getExistingFileNamesInDriveFolder(
+      String driveFolderId) async {
+    final cleanId = CloudSyncService.extractDriveFolderId(driveFolderId);
+    final result = <String>{};
+
+    // 1. Include in-memory tracked files for this folder
+    if (_remoteFilesByFolder.containsKey(cleanId)) {
+      result.addAll(_remoteFilesByFolder[cleanId]!);
+    }
+
+    // 2. Real Google Drive API v3 files.list query
+    final user = _currentUser;
+    if (user != null &&
+        user.hasRealAccessToken &&
+        !_isOffline &&
+        cleanId.isNotEmpty &&
+        !cleanId.startsWith('1GDrive_')) {
+      try {
+        final query = "'$cleanId' in parents and trashed = false";
+        final uri = Uri.parse(
+          'https://www.googleapis.com/drive/v3/files'
+          '?q=${Uri.encodeQueryComponent(query)}'
+          '&fields=files(id,name,mimeType)'
+          '&pageSize=1000'
+          '&supportsAllDrives=true'
+          '&includeItemsFromAllDrives=true',
+        );
+
+        final resp = await _httpClient.get(
+          uri,
+          headers: {'Authorization': 'Bearer ${user.accessToken}'},
+        );
+
+        if (resp.statusCode == 200) {
+          final body = jsonDecode(resp.body) as Map<String, dynamic>;
+          final files = body['files'] as List<dynamic>? ?? [];
+          final subfolderIds = <String>[];
+
+          for (final item in files) {
+            if (item is Map<String, dynamic>) {
+              final name = item['name']?.toString();
+              final mime = item['mimeType']?.toString();
+              final id = item['id']?.toString();
+              if (mime == 'application/vnd.google-apps.folder') {
+                if (id != null && (name == 'Edited' || name == 'Original')) {
+                  subfolderIds.add(id);
+                }
+              } else if (name != null && name.isNotEmpty) {
+                result.add(name);
+              }
+            }
+          }
+
+          // Also inspect 'Edited' and 'Original' subfolders if present
+          for (final subId in subfolderIds) {
+            try {
+              final subQuery = "'$subId' in parents and trashed = false";
+              final subUri = Uri.parse(
+                'https://www.googleapis.com/drive/v3/files'
+                '?q=${Uri.encodeQueryComponent(subQuery)}'
+                '&fields=files(id,name)'
+                '&pageSize=1000'
+                '&supportsAllDrives=true'
+                '&includeItemsFromAllDrives=true',
+              );
+              final subResp = await _httpClient.get(
+                subUri,
+                headers: {'Authorization': 'Bearer ${user.accessToken}'},
+              );
+              if (subResp.statusCode == 200) {
+                final subBody =
+                    jsonDecode(subResp.body) as Map<String, dynamic>;
+                final subFiles = subBody['files'] as List<dynamic>? ?? [];
+                for (final subItem in subFiles) {
+                  if (subItem is Map<String, dynamic>) {
+                    final name = subItem['name']?.toString();
+                    if (name != null && name.isNotEmpty) {
+                      result.add(name);
+                    }
+                  }
+                }
+              }
+            } catch (_) {}
+          }
+        }
+      } catch (e) {
+        // Gracefully keep cached result if network error occurs
+      }
+    }
+
+    return result;
+  }
+
+  @override
+  Future<UploadAllSummary> uploadAllPhotos({
+    required String sessionId,
+    required String driveFolderId,
+    required UploadVariant variant,
+    String? activeLutId,
+  }) async {
+    final photos = await db.getPhotosForSession(sessionId);
+    if (photos.isEmpty) {
+      return const UploadAllSummary(
+        totalPhotos: 0,
+        enqueuedCount: 0,
+        skippedCount: 0,
+      );
+    }
+
+    final cleanFolderId =
+        CloudSyncService.extractDriveFolderId(driveFolderId);
+
+    // 1. Check existing remote files in Drive folder
+    final remoteFileNames =
+        await getExistingFileNamesInDriveFolder(cleanFolderId);
+
+    // 2. Fetch local upload queue items
+    final allQueueItems = await db.getAllUploadQueueItems();
+    final queueByPhotoId = {
+      for (final item in allQueueItems) item.photoId: item
+    };
+
+    int enqueuedCount = 0;
+    int skippedCount = 0;
+    final skippedPhotoNames = <String>[];
+
+    for (final photo in photos) {
+      final queueItem = queueByPhotoId[photo.id];
+      final bool isAlreadyCompleted =
+          queueItem != null && queueItem.status == 'completed';
+      final bool isInFlight = queueItem != null &&
+          (queueItem.status == 'pending' ||
+              queueItem.status == 'bakingLut' ||
+              queueItem.status == 'uploading');
+      final bool existsOnDrive = remoteFileNames.contains(photo.fileName);
+
+      if (isAlreadyCompleted || isInFlight || existsOnDrive) {
+        skippedCount++;
+        skippedPhotoNames.add(photo.fileName);
+      } else {
+        await enqueuePhoto(
+          localPhotoId: photo.id,
+          driveFolderId: driveFolderId,
+          variant: variant,
+          activeLutId: activeLutId,
+        );
+        enqueuedCount++;
+      }
+    }
+
+    return UploadAllSummary(
+      totalPhotos: photos.length,
+      enqueuedCount: enqueuedCount,
+      skippedCount: skippedCount,
+      skippedPhotoNames: skippedPhotoNames,
+    );
+  }
+
   Future<void> _processQueue({
     String? activeLutId,
     String? driveFolderId,
@@ -846,6 +1006,12 @@ class GoogleDriveCloudSyncService implements CloudSyncService {
         }
 
         _setError(null);
+        final cleanFolder =
+            CloudSyncService.extractDriveFolderId(resolvedDriveFolderId);
+        _remoteFilesByFolder
+            .putIfAbsent(cleanFolder, () => <String>{})
+            .add(photo.fileName);
+
         await db.updateUploadStatus(
           id: item.id,
           status: 'completed',
@@ -889,6 +1055,12 @@ class GoogleDriveCloudSyncService implements CloudSyncService {
         UploadVariant.original => '${folderBase}_Original_$photoId',
         UploadVariant.both => '${folderBase}_EditedAndOriginal_$photoId',
       };
+
+      final cleanFolder =
+          CloudSyncService.extractDriveFolderId(resolvedDriveFolderId);
+      _remoteFilesByFolder
+          .putIfAbsent(cleanFolder, () => <String>{})
+          .add(photo.fileName);
 
       await db.updateUploadStatus(
         id: item.id,
