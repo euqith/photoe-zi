@@ -16,10 +16,15 @@ Dokumen ini menjelaskan langkah mudah membuat **OAuth 2.0 Desktop Client ID** pr
 
 ## Langkah 2: Aktifkan Google Drive API
 
-1. Masuk ke menu **APIs & Services** > **Enabled APIs & Services**.
-2. Klik tombol **+ ENABLE APIS AND SERVICES** di bagian atas.
-3. Cari: `Google Drive API`.
-4. Klik **Google Drive API**, lalu klik tombol biru **ENABLE**.
+Halaman yang Anda lihat di Google Cloud Console adalah daftar API yang **sudah aktif** secara default (seperti BigQuery, Cloud Storage). Karena Google Drive API belum diaktifkan, API tersebut belum muncul di daftar tersebut.
+
+**Cara mengaktifkannya:**
+1. Klik tombol **`+ Enable APIs and services`** yang ada di bagian atas tabel (tepat di sebelah judul **APIs & Services**).
+2. Di kotak pencarian, ketik: **`Google Drive API`**.
+3. Klik **Google Drive API**, lalu klik tombol biru **ENABLE**.
+
+> 💡 **Tautan Langsung:** Anda juga bisa langsung membuka tautan ini untuk langsung menuju halaman aktivasi Google Drive API:  
+> 👉 [https://console.cloud.google.com/apis/library/drive.googleapis.com](https://console.cloud.google.com/apis/library/drive.googleapis.com)
 
 ---
 
@@ -70,3 +75,4 @@ Saat melakukan build atau run aplikasi:
 ```bash
 flutter run -d macos --dart-define=PHOTOE_ZI_GDRIVE_CLIENT_ID="YOUR_CLIENT_ID.apps.googleusercontent.com" --dart-define=PHOTOE_ZI_GDRIVE_CLIENT_SECRET="YOUR_CLIENT_SECRET"
 ```
+

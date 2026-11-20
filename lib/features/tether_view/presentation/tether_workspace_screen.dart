@@ -1636,6 +1636,33 @@ class _TetherWorkspaceScreenState
                                 InkWell(
                                   onTap: () {
                                     GoogleDriveCloudSyncService.openSystemUrl(
+                                      'https://console.cloud.google.com/apis/library/drive.googleapis.com',
+                                    );
+                                  },
+                                  child: const Row(
+                                    mainAxisSize: MainAxisSize.min,
+                                    children: [
+                                      Icon(
+                                        Icons.open_in_new_rounded,
+                                        size: 12,
+                                        color: StudioColors.accentAmber,
+                                      ),
+                                      SizedBox(width: 3),
+                                      Text(
+                                        '1. Enable Drive API',
+                                        style: TextStyle(
+                                          fontSize: 10.5,
+                                          color: StudioColors.accentAmber,
+                                          decoration: TextDecoration.underline,
+                                        ),
+                                      ),
+                                    ],
+                                  ),
+                                ),
+                                const SizedBox(width: 10),
+                                InkWell(
+                                  onTap: () {
+                                    GoogleDriveCloudSyncService.openSystemUrl(
                                       'https://console.cloud.google.com/apis/credentials',
                                     );
                                   },
@@ -1649,7 +1676,7 @@ class _TetherWorkspaceScreenState
                                       ),
                                       SizedBox(width: 3),
                                       Text(
-                                        'Open GCP Console',
+                                        '2. Credentials',
                                         style: TextStyle(
                                           fontSize: 10.5,
                                           color: StudioColors.accentAmber,
