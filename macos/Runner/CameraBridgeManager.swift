@@ -32,6 +32,7 @@ class CameraBridgeManager: NSObject, FlutterStreamHandler, ICDeviceBrowserDelega
   private var deviceBrowser: ICDeviceBrowser?
   private var connectedCameraDevice: ICCameraDevice?
   private var activeDriverType = "mock"
+  private var canonWifiSession: CanonEosWifiSession?
 
   // Live View & Capture State
   private var isLiveViewActive: Bool = false
@@ -126,7 +127,7 @@ class CameraBridgeManager: NSObject, FlutterStreamHandler, ICDeviceBrowserDelega
       } else if driverType == "canon_wifi" {
         let ip = (args["ipAddress"] as? String) ?? "192.168.1.1"
         let port = UInt16((args["port"] as? Int) ?? 15740)
-        connectPtpIp(host: ip, port: port, completion: result)
+        connectCanonWifi(host: ip, port: port, completion: result)
       } else if driverType == "fuji_wifi" {
         let ip = (args["ipAddress"] as? String) ?? "192.168.0.1"
         let rawPort = (args["port"] as? Int) ?? 55740
@@ -1209,7 +1210,44 @@ class CameraBridgeManager: NSObject, FlutterStreamHandler, ICDeviceBrowserDelega
     }
   }
 
+  // MARK: - Canon EOS Wi-Fi Passive Tethering
+  private func connectCanonWifi(host: String, port: UInt16, completion: @escaping FlutterResult) {
+    disconnect()
+    self.lastConnectedHost = host
+    sendEvent(type: "connectionStateChanged", data: "connecting")
+    logPtpIp("[CanonEOS] Connecting to \(host):\(port) (Passive Tethering mode)...")
+
+    let session = CanonEosWifiSession(
+      log: { [weak self] msg in
+        self?.logPtpIp("[CanonEOS] \(msg)")
+      },
+      state: { [weak self] stateStr in
+        guard let self = self else { return }
+        self.isConnected = (stateStr == "connected")
+        self.sendEvent(type: "connectionStateChanged", data: stateStr)
+      },
+      photo: { [weak self] photoId, fileName, previewData, fullResPath, exif in
+        guard let self = self else { return }
+        let payload: [String: Any] = [
+          "id": photoId,
+          "fileName": fileName,
+          "previewBytes": previewData != nil ? FlutterStandardTypedData(bytes: previewData!) : NSNull(),
+          "fullResLocalPath": fullResPath ?? NSNull(),
+          "capturedAt": Int(Date().timeIntervalSince1970 * 1000),
+          "exif": exif
+        ]
+        self.sendEvent(type: "photoAdded", data: payload)
+      }
+    )
+    self.canonWifiSession = session
+    session.connect(host: host, port: port) { success in
+      completion(success)
+    }
+  }
+
   func disconnect() {
+    canonWifiSession?.disconnect()
+    canonWifiSession = nil
     handshakeTimeoutWorkItem?.cancel()
     handshakeTimeoutWorkItem = nil
     fujiKeepAliveTimer?.cancel()
